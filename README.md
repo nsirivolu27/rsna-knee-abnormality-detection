@@ -73,12 +73,12 @@ from pathlib import Path
 
 repo_root = Path("/kaggle/input/<uploaded-repository-dataset>")
 sys.path.insert(0, str(repo_root))
-os.environ["RSNA_KNEE_DATA_ROOT"] = "/kaggle/input/rsna-knee-abnormality-detection"
+os.environ["RSNA_KNEE_DATA_ROOT"] = "/kaggle/input/competitions/rsna-knee-abnormality-detection"
 
 from src import config
 ```
 
-`src.config.DATA_ROOT` defaults to `/kaggle/input/rsna-knee-abnormality-detection/`; the environment variable is available for the local subset override described below. After import, modules should read paths and constants from `src.config`; notebook cells should not scatter `/kaggle/input/...` paths throughout the analysis.
+`src.config.DATA_ROOT` auto-detects the two supported Kaggle mount layouts and prefers the `competitions/` form. The environment variable is available for the local subset override described below. After import, modules should read paths and constants from `src.config`; notebook cells should not scatter `/kaggle/input/...` paths throughout the analysis.
 
 ## Generating a small local subset
 
