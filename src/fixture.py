@@ -5,7 +5,6 @@ from typing import Union
 
 import numpy as np
 import pandas as pd
-import pydicom
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, MRImageStorage
 
@@ -38,18 +37,16 @@ def _write_dicom(
         file_meta=file_meta,
         preamble=b"\x00" * 128,
     )
-    dataset.is_little_endian = True
-    dataset.is_implicit_VR = False
     dataset.SOPClassUID = MRImageStorage
     dataset.SOPInstanceUID = file_meta.MediaStorageSOPInstanceUID
     dataset.StudyInstanceUID = study_uid
     dataset.SeriesInstanceUID = series_uid
     dataset.Modality = "MR"
-    dataset.SeriesDescription = "Synthetic PD fat-sat"
-    dataset.Manufacturer = "Synthetic Manufacturer"
-    dataset.ManufacturerModelName = "Synthetic Model"
-    dataset.StationName = "Synthetic Station"
-    dataset.InstitutionName = "Synthetic Institution"
+    dataset.SeriesDescription = "Synthetic PD"
+    dataset.Manufacturer = "Synthetic"
+    dataset.ManufacturerModelName = "Synth Model"
+    dataset.StationName = "SynthStation"
+    dataset.InstitutionName = "SynthSite"
     dataset.MagneticFieldStrength = 1.5
     dataset.PixelSpacing = [0.5, 0.5]
     dataset.SliceThickness = 3.0
@@ -65,7 +62,7 @@ def _write_dicom(
     dataset.HighBit = 15
     dataset.PixelRepresentation = 0
     dataset.PixelData = pixel_array.tobytes()
-    dataset.save_as(file_path, write_like_original=False)
+    dataset.save_as(file_path)
 
 
 def create_synthetic_dataset(root: FixturePath) -> Path:
