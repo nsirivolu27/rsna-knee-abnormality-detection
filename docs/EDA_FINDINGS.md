@@ -183,11 +183,66 @@ missing-space typos (`grade5` ×5, `CORT1`, `img2`, `angle1`) at 1–5 occurrenc
 
 ---
 
-## 6. Site proxy from placeholder signatures
+## 6. Site identity — no direct field, four proxies
 
-There is no institution column, but de-identification configuration varies by
-site and leaves a fingerprint. Which placeholders co-occur in a report,
-crossed with language:
+`StationName` and `InstitutionName` are **fully stripped**: `None` in all 1,088
+sampled series. There is no institution column anywhere in this dataset. Site
+must be approximated.
+
+Measured on a 200-exam / 1,088-series random sample.
+
+### 6.1 Scanner model — strongest signal
+
+For every non-English language, model is close to a site identifier:
+
+| model | language concentration |
+|---|---|
+| MAGNETOM Avanto fit | 14/14 German |
+| MAGNETOM Prisma | 6/6 Greek |
+| SonataVision | 8/8 Greek (a second Greek site) |
+| Skyra | 9/9 Spanish |
+| MAGNETOM Aera | 5/5 French |
+| SIGNA Architect | 5/5 Turkish |
+| Ingenia | shared — bg 11, en 13, es 7, hr 9 |
+
+Ingenia is the exception; it is a common scanner and spans four languages.
+
+### 6.2 Manufacturer string spelling
+
+Vendor strings are **not normalized in the source data**, and the specific
+spelling is itself informative — it is emitted by the scanner's software
+version, so it separates sites and equipment generations:
+
+```
+Siemens Healthineers 278 | SIEMENS 233 | Siemens 17
+Philips Medical Systems 179 | Philips 138 | Philips Healthcare 15
+GE MEDICAL SYSTEMS 189 | GEHC 5
+TOSHIBA 27 | CANON_MEC 7      (same vendor lineage; Canon acquired Toshiba Medical)
+```
+
+Keep the raw string **and** a normalized vendor column. Discarding the raw
+spelling throws away site signal.
+
+### 6.3 SeriesDescription naming convention
+
+House style is site-specific:
+
+| example | convention |
+|---|---|
+| `pd_tse_fs_sag_320`, `t1_tse_cor_320` | Siemens lowercase-underscore |
+| `PDW_TSE_SPAIR_Sag`, `T1W_TSE_Cor` | Philips |
+| `COR T1` | terse manual naming |
+
+These encode sequence type, plane (`tra` = transverse = axial), fat suppression
+(`fs`, `SPAIR`, `we`) and acquisition matrix (320 / 384 / 448).
+
+`DummySeriesDesc!` appears in **163 of 1,088 series (15%)** — a de-identification
+placeholder applied by some contributing sites and not others, and therefore a
+fingerprint in its own right. A further 28 are `None`.
+
+### 6.4 Report de-ID placeholder signature
+
+Which placeholders co-occur in a report, crossed with language:
 
 | signature | en | nl | de | el | es | bg | hr | tr | fr |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -197,23 +252,53 @@ crossed with language:
 | `[DATE]` alone | 14 | 151 | 24 | 22 | 13 | 3 | 1 | 0 | 0 |
 | none | 1,307 | ~0 | 237 | 298 | 666 | 217 | ~405 | 546 | 81 |
 
-**Reading.** Every `[TIME]`-bearing signature is exclusively English. Dutch is
-151/153 `[DATE]`. Turkish, French and Croatian are essentially placeholder-free.
+Every `[TIME]`-bearing signature is exclusively English. Dutch is 151/153
+`[DATE]`. Turkish, French and Croatian are effectively placeholder-free. This is
+the only proxy that separates English sub-sites.
 
-**Why it matters.** English is 39% of the corpus and is certainly several
-institutions pooled. Language alone cannot separate them; de-ID signature yields
-roughly four distinguishable English groups. This is the best available site
-proxy so far — useful as a CV grouping variable, and a warning about what the
-model must not learn.
+### 6.5 Recommended grouping key
 
-**Limitation.** 1,307 English reports carry no placeholders and remain
-unresolved by this method.
+**38 distinct (manufacturer, model, field strength) combinations** in the
+200-exam sample. External sources describe 16–19 contributing sites, so several
+sites operate more than one scanner. Grouping by scanner is *finer* than
+grouping by site — the conservative direction for cross-validation.
+
+Proposed CV group key:
+
+```
+(normalized_manufacturer, model, MagneticFieldStrength,
+ detected_language, placeholder_signature)
+```
+
+At ~4,400 exams over ~40 groups that averages ~110 exams per group, which
+supports 5-fold grouped splits.
+
+**Known weakness.** English exams spread thinly across 19 models with mostly
+empty placeholder signatures. English site attribution remains partial and
+should be stated as a limitation in any CV write-up.
 
 ---
 
-## 7. Open questions — resolve before writing an extractor
+## 7. Acquisition protocol
 
-### 7.1 Label definitions are not keyword presence *(highest priority)*
+| field strength | series |
+|---|---:|
+| 1.5 T | 632 |
+| 3.0 T | 416 |
+| missing | 40 |
+
+Slice thickness is concentrated at 3.0 mm (677), 4.0 mm (174), 3.5 mm (89) and
+2.5 mm (54), with a thin tail down to 0.6 mm. Note that 0.6 appears as two
+separate value-counts entries — float representation differs between files, so
+any dedupe or grouping on thickness must round first.
+
+Zero read warnings across 1,088 sampled series: the DICOM files are well formed.
+
+---
+
+## 8. Open questions
+
+### 8.1 Label definitions are not keyword presence *(the blocker)*
 
 Two of the 58, read against their labels:
 
@@ -225,24 +310,18 @@ Two of the 58, read against their labels:
 - "Horizontal tear at anterior horn of the lateral meniscus" → **Lateral Meniscus = 1**
 - "Moderate joint effusion, distended suprapatellar bursa" → **Effusion = 0**
 
-The meniscus pair is explicable: the label likely means *tear* specifically, and
-marginal amputation is not a tear. The effusion pair is not — mild scores 1
+The meniscus pair is explicable — the label likely means *tear* specifically,
+and marginal amputation is not a tear. The effusion pair is not: mild scores 1
 while moderate scores 0.
 
-This is either a strict clinical definition not yet found, or label noise in the
-only ground truth available. n=2, so do not over-conclude. Resolve by reading
-the competition's published labeling guideline (Data tab / Discussion) and by
-auditing all 58 exports in `labeled_58.md`.
+Either a strict clinical definition not yet found, or label noise in the only
+ground truth available. n=2, so do not over-conclude. Resolve by reading the
+competition's published labeling guideline (Data tab / Discussion) and auditing
+all 58 in `labeled_58.md`.
 
-### 7.2 DICOM metadata — not yet examined
+**Nothing downstream of the extractor is safe to build until this is settled.**
 
-The remaining EDA branch. On a **sample of a few hundred exams only** (never all
-24,371 series), pull `Manufacturer`, `ManufacturerModelName`, `StationName`,
-`MagneticFieldStrength`, `InstitutionName` if present, plus pixel spacing and
-slice thickness. Goals: complete the site proxy where placeholders fail, and
-quantify protocol variation.
-
-### 7.3 Evaluation metric
+### 8.2 Evaluation metric
 
 Probability-valued submission is consistent with an AUC metric, and a separate
 efficiency leaderboard is documented externally. Confirm both on the Evaluation
@@ -250,18 +329,30 @@ tab.
 
 ---
 
-## 8. Design implications
+## 9. Design implications
 
 1. **Image-only at inference.** Reports are training-time supervision. Nothing
    in the inference path may touch text.
 2. **The pipeline is two-stage.** Report → labels (the hard, high-leverage
    part), then images → labels. Extractor quality caps everything downstream.
-3. **NaN is unknown, never zero.** Label parsing must return an observed-mask
+3. **NaN is unknown, never zero.** Label parsing returns an observed-mask
    alongside values. Every count reported as positive / negative / missing —
    never a bare mean over a column that is 98.7% NaN.
 4. **Negation handling is mandatory** in nine languages. "no evidence of
-   meniscal tear" and "meniscal tear" share the keyword.
-5. **Group CV** by site proxy (de-ID signature + language + DICOM metadata),
-   not randomly.
-6. **Lazy, per-exam DICOM access.** No function may glob the whole tree or
+   meniscal tear" and "meniscal tear" share the keyword. English alone contains
+   2,975 standalone uses of "intact".
+5. **Reports contain ordinary dictation typos** ("less thab 50%") in all nine
+   languages. Exact-match extraction will be brittle.
+6. **Group CV** by the section 6.5 key, never randomly.
+7. **`SeriesDescription` is for routing, not features.** It reliably encodes
+   sequence type, plane, fat suppression and matrix size, which makes it ideal
+   for *selecting* which series to feed the model. It must never be a model
+   input: it is a site fingerprint, and a model given it will learn the
+   institution rather than the pathology. The same caution applies to
+   Manufacturer, model and field strength.
+8. **Cross-check the provided series flags.** `Fluid_Sensitive`,
+   `Fat_Suppression` and `Anatomical_Plane` can be validated against
+   `SeriesDescription` tokens (`fs` / `SPAIR` / `we`; `sag` / `cor` / `tra`).
+   Quantify disagreement before trusting either source.
+9. **Lazy, per-exam DICOM access.** No function may glob the whole tree or
    build an index requiring every file to be read.
