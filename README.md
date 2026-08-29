@@ -73,7 +73,7 @@ from pathlib import Path
 
 repo_root = Path("/kaggle/input/<uploaded-repository-dataset>")
 sys.path.insert(0, str(repo_root))
-os.environ["RSNA_KNEE_DATA_ROOT"] = \"/kaggle/input/rsna-knee-abnormality-detection\"
+os.environ["RSNA_KNEE_DATA_ROOT"] = "/kaggle/input/rsna-knee-abnormality-detection"
 
 from src import config
 ```
