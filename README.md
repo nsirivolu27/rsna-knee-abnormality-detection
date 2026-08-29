@@ -4,13 +4,13 @@ Scaffold and exploratory data analysis for the Kaggle RSNA Knee Abnormality Dete
 
 ## Current status
 
-The repository is in the scaffold phase. The competition schema and data layout are **unverified** until the competition owner provides the Data-tab file/folder listing, each CSV header plus three sample rows, and the exact twelve label names. No parser should guess those values.
+The verified schema is implemented in the central config. The data loaders, DICOM utilities, report normalization, synthetic fixture, and pytest coverage are now present; the EDA notebook remains for a later chunk.
 
 The competition data is approximately 247 GB decompressed and will not be stored on a local computer or in this repository. The full dataset is mounted read-only inside a Kaggle notebook after the competition is attached.
 
 ## Planned layout
 
-`src/config.py` is the single source of truth for paths, constants, and the verified schema. The remaining files will be added in later scoped chunks.
+`src/config.py` is the single source of truth for paths, constants, and the verified schema. The EDA notebook and written findings remain to be added in later scoped chunks.
 
 ```text
 .
