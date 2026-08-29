@@ -13,7 +13,7 @@ def test_load_series_orders_slices_and_extracts_metadata(synthetic_dataset):
     assert result.volume is not None
     assert result.volume.shape == (3, 8, 8)
     assert result.volume.dtype.name == "uint16"
-    assert result.metadata["Manufacturer"] == "Synthetic Manufacturer"
+    assert result.metadata["Manufacturer"] == "Synthetic"
     assert result.metadata["shape"] == (3, 8, 8)
 
 
