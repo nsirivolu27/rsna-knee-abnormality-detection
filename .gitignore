@@ -1,5 +1,8 @@
 # Dataset files — never commit competition data
 data/
+local_subset/
+labeled_58.md
+*_reports.md
 *.dcm
 *.DCM
 *.nii
