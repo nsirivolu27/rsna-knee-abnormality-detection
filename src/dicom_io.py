@@ -245,3 +245,134 @@ def sample_series_metadata(
         rows.append(output)
 
     return pd.DataFrame(rows)
+
+
+
+def _requested_exam_ids(exams: object) -> list[str] | None:
+    """Normalize an optional exam selection without scanning any DICOM tree."""
+    if exams is None:
+        return None
+    if isinstance(exams, pd.DataFrame):
+        if config.EXAM_ID_COLUMN not in exams.columns:
+            raise ValueError(f"exams must contain {config.EXAM_ID_COLUMN!r}.")
+        values = exams[config.EXAM_ID_COLUMN].tolist()
+    elif isinstance(exams, (str, Path)):
+        values = [exams]
+    else:
+        values = list(exams)  # type: ignore[arg-type]
+    return list(dict.fromkeys(str(value) for value in values if value is not None))
+
+
+def _metadata_output_columns() -> list[str]:
+    return [
+        config.EXAM_ID_COLUMN,
+        "selected_series_uid",
+        "selection_strategy",
+        *config.DICOM_METADATA_FIELDS,
+        "warning_code",
+        "warning_message",
+    ]
+
+
+def exam_metadata(
+    exams: object = None,
+    series_csv: Optional[SeriesPath] = None,
+    series_root: Optional[SeriesPath] = None,
+    cache_path: Optional[SeriesPath] = None,
+) -> pd.DataFrame:
+    """Read one DICOM header per exam and return full-corpus metadata.
+
+    A sagittal series is preferred for the single header read; the first
+    available series is used as a deterministic fallback. The function reads
+    the series table once and only enters the selected exam/series directory,
+    so it performs roughly one DICOM read per exam rather than one per series.
+    DICOM failures become structured warning columns and never abort the
+    remaining exams. An existing parquet cache is returned unchanged.
+    """
+    if cache_path is not None:
+        cache = Path(cache_path)
+        if cache.exists():
+            return pd.read_parquet(cache)
+
+    csv_path = Path(series_csv) if series_csv is not None else config.TRAIN_SERIES_CSV
+    root = Path(series_root) if series_root is not None else config.TRAIN_SERIES_ROOT
+    series_frame = pd.read_csv(
+        csv_path,
+        usecols=[
+            config.EXAM_ID_COLUMN,
+            config.SERIES_ID_COLUMN,
+            config.ANATOMICAL_PLANE_COLUMN,
+        ],
+        dtype={
+            config.EXAM_ID_COLUMN: "string",
+            config.SERIES_ID_COLUMN: "string",
+            config.ANATOMICAL_PLANE_COLUMN: "string",
+        },
+    )
+    series_frame[config.EXAM_ID_COLUMN] = series_frame[config.EXAM_ID_COLUMN].astype(str)
+    series_frame[config.SERIES_ID_COLUMN] = series_frame[config.SERIES_ID_COLUMN].astype(str)
+
+    requested = _requested_exam_ids(exams)
+    exam_ids = (
+        requested
+        if requested is not None
+        else series_frame[config.EXAM_ID_COLUMN].drop_duplicates().tolist()
+    )
+    by_exam = {
+        str(exam_id): group
+        for exam_id, group in series_frame.groupby(config.EXAM_ID_COLUMN, sort=False)
+    }
+
+    rows: list[dict[str, object]] = []
+    for exam_id in exam_ids:
+        output: dict[str, object] = {
+            column: None for column in _metadata_output_columns()
+        }
+        output[config.EXAM_ID_COLUMN] = str(exam_id)
+        output["warning_code"] = None
+        output["warning_message"] = None
+
+        group = by_exam.get(str(exam_id))
+        if group is None or group.empty:
+            output["warning_code"] = "missing_exam_series"
+            output["warning_message"] = "Exam was not present in the series table."
+            rows.append(output)
+            continue
+
+        sagittal = group[
+            group[config.ANATOMICAL_PLANE_COLUMN]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.casefold()
+            .isin({"sagittal", "sag"})
+        ]
+        selected = sagittal.iloc[0] if not sagittal.empty else group.iloc[0]
+        strategy = "sagittal" if not sagittal.empty else "first_available"
+        series_id = str(selected[config.SERIES_ID_COLUMN])
+        output["selected_series_uid"] = series_id
+        output["selection_strategy"] = strategy
+        series_path = root / str(exam_id) / series_id
+        file_path = _first_series_file(series_path)
+        if file_path is None:
+            output["warning_code"] = "missing_series_file"
+            output["warning_message"] = "No readable candidate file was found."
+            rows.append(output)
+            continue
+
+        try:
+            dataset = pydicom.dcmread(
+                str(file_path), force=True, stop_before_pixels=True
+            )
+            output.update(extract_metadata(dataset))
+        except Exception as error:
+            output["warning_code"] = "malformed_dicom"
+            output["warning_message"] = str(error)
+        rows.append(output)
+
+    result = pd.DataFrame(rows, columns=_metadata_output_columns())
+    if cache_path is not None:
+        cache = Path(cache_path)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        result.to_parquet(cache, index=False)
+    return result
