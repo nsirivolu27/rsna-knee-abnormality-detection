@@ -223,9 +223,12 @@ def build_site_proxy(
     per-exam mode. Reports may be the output of src.reports.load_reports or a
     frame containing Report.
 
-    The grouping key is exactly the findings-defined tuple:
+    The initial grouping key is exactly the findings-defined tuple:
     (normalized_manufacturer, model, MagneticFieldStrength,
-    detected_language, placeholder_signature).
+    detected_language, placeholder_signature). Groups below min_group_size are
+    assigned to (normalized_manufacturer, detected_language), then to
+    (detected_language,) if still too small. The original and assigned keys,
+    group size, and assignment level are all returned for auditability.
     """
     if min_group_size < 1:
         raise ValueError("min_group_size must be at least 1.")
@@ -246,7 +249,7 @@ def build_site_proxy(
         if column not in result.columns:
             result[column] = default
 
-    result["site_proxy_key"] = [
+    result["full_site_proxy_key"] = [
         (
             _key_component(row["normalized_manufacturer"]),
             _key_component(row["model"]),
@@ -256,12 +259,43 @@ def build_site_proxy(
         )
         for _, row in result.iterrows()
     ]
+    full_sizes = result["full_site_proxy_key"].value_counts(dropna=False)
+    manufacturer_language_keys = result.apply(
+        lambda row: (
+            _key_component(row["normalized_manufacturer"]),
+            _key_component(row["detected_language"]),
+        ),
+        axis=1,
+    )
+    language_keys = result["detected_language"].map(
+        lambda value: (_key_component(value),)
+    )
+    manufacturer_language_sizes = manufacturer_language_keys.value_counts(dropna=False)
+    language_sizes = language_keys.value_counts(dropna=False)
+
+    assigned_keys: list[tuple[object, ...]] = []
+    assignment_levels: list[str] = []
+    for full_key, manufacturer_language_key, language_key in zip(
+        result["full_site_proxy_key"], manufacturer_language_keys, language_keys
+    ):
+        if int(full_sizes[full_key]) >= min_group_size:
+            assigned_keys.append(full_key)
+            assignment_levels.append("full")
+        elif int(manufacturer_language_sizes[manufacturer_language_key]) >= min_group_size:
+            assigned_keys.append(manufacturer_language_key)
+            assignment_levels.append("manufacturer_language")
+        else:
+            assigned_keys.append(language_key)
+            assignment_levels.append("language")
+
+    result["site_proxy_key"] = assigned_keys
+    result["site_proxy_assignment_level"] = assignment_levels
     result["site_proxy"] = result["site_proxy_key"].map(
         lambda key: "|".join(str(part) for part in key)
     )
 
-    sizes = result["site_proxy_key"].value_counts(dropna=False)
-    result["site_proxy_group_size"] = result["site_proxy_key"].map(sizes).astype(int)
+    assigned_sizes = result["site_proxy_key"].value_counts(dropna=False)
+    result["site_proxy_group_size"] = result["site_proxy_key"].map(assigned_sizes).astype(int)
     result["site_proxy_under_minimum"] = result["site_proxy_group_size"] < min_group_size
     result["site_proxy_under_30"] = result["site_proxy_group_size"] < 30
 
@@ -275,7 +309,9 @@ def build_site_proxy(
         "SliceThickness",
         "detected_language",
         "placeholder_signature",
+        "full_site_proxy_key",
         "site_proxy_key",
+        "site_proxy_assignment_level",
         "site_proxy",
         "site_proxy_group_size",
         "site_proxy_under_minimum",
