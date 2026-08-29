@@ -1,0 +1,44 @@
+# Dataset files — never commit competition data
+data/
+*.dcm
+*.DCM
+*.nii
+*.nii.gz
+*.zip
+*.tar
+*.tar.gz
+
+# Model artifacts and caches
+models/
+weights/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Local environments and secrets
+.venv/
+venv/
+.env
+.env.*
+
+# Replit-specific files
+.replit
+replit.nix
+.local/
+.agents/
+
+# Packaging and editor noise
+*.egg-info/
+dist/
+build/
+.DS_Store
+.vscode/
+.idea/
