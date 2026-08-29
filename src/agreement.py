@@ -44,15 +44,16 @@ def _validate_expert(frame: pd.DataFrame) -> pd.DataFrame:
     missing = [label for label in config.TARGET_LABELS if label not in frame.columns]
     if missing:
         raise ValueError(f"expert labels are missing columns: {missing!r}")
-    values = frame.loc[:, config.TARGET_LABELS].apply(pd.to_numeric, errors="coerce")
-    invalid = values.notna() & ~values.isin([0.0, 1.0])
+    raw = frame.loc[:, config.TARGET_LABELS]
+    values = raw.apply(pd.to_numeric, errors="coerce")
+    invalid = raw.notna() & (values.isna() | ~values.isin([0.0, 1.0]))
     if invalid.any().any():
         label = next(column for column in values.columns if invalid[column].any())
         position = int(np.flatnonzero(invalid[label].to_numpy())[0])
         exam_id = values.index[position]
         raise ValueError(
             f"Invalid expert label at exam {exam_id!r}, label {label!r}: "
-            f"{values.iloc[position][label]!r}. Expected 0, 1, or NaN."
+            f"{raw.iloc[position][label]!r}. Expected 0, 1, or NaN."
         )
     return values
 
@@ -61,19 +62,23 @@ def _validate_derived(frame: pd.DataFrame) -> pd.DataFrame:
     missing = [label for label in config.TARGET_LABELS if label not in frame.columns]
     if missing:
         raise ValueError(f"derived labels are missing columns: {missing!r}")
-    values = frame.loc[:, config.TARGET_LABELS].apply(pd.to_numeric, errors="coerce")
+    raw = frame.loc[:, config.TARGET_LABELS]
+    values = raw.apply(pd.to_numeric, errors="coerce")
     for label in config.TARGET_LABELS:
         column = values[label]
         array = column.to_numpy(dtype=float)
-        invalid = column.notna().to_numpy() & (
-            ~np.isfinite(array) | (array < 0.0) | (array > 1.0)
+        invalid = raw[label].notna().to_numpy() & (
+            column.isna().to_numpy()
+            | ~np.isfinite(array)
+            | (array < 0.0)
+            | (array > 1.0)
         )
         if invalid.any():
             position = int(np.flatnonzero(invalid)[0])
             exam_id = values.index[position]
             raise ValueError(
                 f"Invalid derived probability at exam {exam_id!r}, label {label!r}: "
-                f"{column.iloc[position]!r}. Expected a value in [0, 1] or NaN."
+                f"{raw.iloc[position][label]!r}. Expected a value in [0, 1] or NaN."
             )
     return values
 
