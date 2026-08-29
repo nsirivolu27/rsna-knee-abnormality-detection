@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 
+from pydicom.multival import MultiValue
+
 import numpy as np
 import pandas as pd
 import pydicom
@@ -61,7 +63,7 @@ def _slice_sort_key(dataset: pydicom.dataset.Dataset, path: Path) -> tuple[objec
 def _plain_value(value: object) -> object:
     if value is None:
         return None
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple, MultiValue)):
         return [_plain_value(item) for item in value]
     if hasattr(value, "tolist"):
         return value.tolist()
