@@ -1,0 +1,10 @@
+# Expected to be available in the standard Kaggle notebook image.
+numpy>=1.24
+pandas>=2.0
+matplotlib>=3.7
+seaborn>=0.12
+pydicom>=2.4
+
+# Local/Replit authoring and repository hygiene only.
+pytest>=7.0
+nbstripout>=0.6
