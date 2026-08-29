@@ -272,13 +272,37 @@ def build_site_proxy(
     )
     manufacturer_language_sizes = manufacturer_language_keys.value_counts(dropna=False)
     language_sizes = language_keys.value_counts(dropna=False)
+    small_full = result["full_site_proxy_key"].map(full_sizes) < min_group_size
+    fallback_manufacturer_language = set(
+        manufacturer_language_keys[small_full]
+        .loc[
+            manufacturer_language_keys[small_full].map(manufacturer_language_sizes)
+            >= min_group_size
+        ]
+        .tolist()
+    )
+    fallback_language = set(
+        language_keys[small_full]
+        .loc[
+            manufacturer_language_keys[small_full].map(manufacturer_language_sizes)
+            < min_group_size
+        ]
+        .loc[language_keys[small_full].map(language_sizes) >= min_group_size]
+        .tolist()
+    )
 
     assigned_keys: list[tuple[object, ...]] = []
     assignment_levels: list[str] = []
     for full_key, manufacturer_language_key, language_key in zip(
         result["full_site_proxy_key"], manufacturer_language_keys, language_keys
     ):
-        if int(full_sizes[full_key]) >= min_group_size:
+        if manufacturer_language_key in fallback_manufacturer_language:
+            assigned_keys.append(manufacturer_language_key)
+            assignment_levels.append("manufacturer_language")
+        elif language_key in fallback_language:
+            assigned_keys.append(language_key)
+            assignment_levels.append("language")
+        elif int(full_sizes[full_key]) >= min_group_size:
             assigned_keys.append(full_key)
             assignment_levels.append("full")
         elif int(manufacturer_language_sizes[manufacturer_language_key]) >= min_group_size:
