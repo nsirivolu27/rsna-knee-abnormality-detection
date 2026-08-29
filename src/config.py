@@ -11,11 +11,20 @@ from typing import Final
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 
-# The notebook sets this before importing src.config on Kaggle. The local
-# default keeps imports and future synthetic smoke tests usable without the
-# competition data.
+# The full competition dataset is mounted read-only in Kaggle. It is not
+# expected to exist on a local computer or in this repository.
+KAGGLE_DATA_ROOT: Final[Path] = Path(
+    "/kaggle/input/rsna-knee-abnormality-detection"
+)
+
+# This directory is reserved for a small, manually exported subset used only
+# for local loader development and pytest fixtures. It is never the EDA data.
+LOCAL_SUBSET_ROOT: Final[Path] = PROJECT_ROOT / "local_subset"
+
+# Set RSNA_KNEE_DATA_ROOT before importing this module to use the local
+# subset. The default always points to the Kaggle competition mount.
 DATA_ROOT: Final[Path] = Path(
-    os.environ.get("RSNA_KNEE_DATA_ROOT", PROJECT_ROOT / "data")
+    os.environ.get("RSNA_KNEE_DATA_ROOT", str(KAGGLE_DATA_ROOT))
 )
 
 RANDOM_SEED: Final[int] = 42
