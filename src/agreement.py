@@ -1,8 +1,7 @@
 """Evaluate externally generated soft labels against expert labels.
 
-This module compares externally generated probabilities with the 58
-expert-labeled exams. It does not generate labels and does not inspect report
-text.
+This module compares externally generated probabilities with the expert-labeled
+exams. It does not generate labels and does not inspect report text.
 """
 
 from __future__ import annotations
@@ -13,6 +12,13 @@ import numpy as np
 import pandas as pd
 
 from . import config
+
+
+RANKING_NOTE = (
+    "AUC intervals use 1,000 seeded bootstrap resamples. With only 9-35 "
+    "expert positives per label, nearby AUC rankings are not reliably "
+    "distinguishable."
+)
 
 
 class AgreementResult(NamedTuple):
@@ -108,9 +114,46 @@ def _auc(y_true: np.ndarray, scores: np.ndarray) -> float:
     )
 
 
+def bootstrap_auc_ci(
+    y_true: np.ndarray,
+    scores: np.ndarray,
+    *,
+    n_bootstrap: int = 1000,
+    seed: int = config.RANDOM_SEED,
+    confidence: float = 0.95,
+) -> tuple[float, float]:
+    """Return a seeded percentile bootstrap interval for AUC.
+
+    Resamples containing only one expert class are omitted. The interval is
+    uncertainty around the observed AUC, not a correction for expert-label
+    noise or a guarantee that nearby labels are meaningfully different.
+    """
+    if n_bootstrap < 1:
+        raise ValueError("n_bootstrap must be at least 1.")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be between 0 and 1.")
+    if len(y_true) == 0:
+        return float("nan"), float("nan")
+
+    rng = np.random.default_rng(seed)
+    bootstrapped: list[float] = []
+    for _ in range(n_bootstrap):
+        indices = rng.integers(0, len(y_true), size=len(y_true))
+        value = _auc(y_true[indices], scores[indices])
+        if not np.isnan(value):
+            bootstrapped.append(value)
+    if not bootstrapped:
+        return float("nan"), float("nan")
+
+    alpha = 1.0 - confidence
+    lower, upper = np.percentile(bootstrapped, [100.0 * alpha / 2.0, 100.0 * (1.0 - alpha / 2.0)])
+    return float(lower), float(upper)
+
+
 def _threshold_metrics(
     y_true: np.ndarray, scores: np.ndarray
 ) -> tuple[float, float, float, float]:
+    """Select and evaluate one threshold on the same data; metrics are upper bounds."""
     if len(scores) == 0:
         return (float("nan"), float("nan"), float("nan"), float("nan"))
 
@@ -135,7 +178,8 @@ def _threshold_metrics(
             )
         )
 
-    # Maximize accuracy; then prefer a threshold near 0.5; then the lower one.
+    # The threshold and metrics are selected and evaluated on the same exams.
+    # They are optimistic upper bounds, not held-out estimates.
     best = min(candidates, key=lambda item: (-item[0], item[4], item[1]))
     return best[1], best[0], best[2], best[3]
 
@@ -143,12 +187,20 @@ def _threshold_metrics(
 def evaluate_agreement(
     expert_labels: Any,
     derived_labels: pd.DataFrame,
+    *,
+    n_bootstrap: int = 1000,
+    seed: int = config.RANDOM_SEED,
 ) -> AgreementResult:
     """Evaluate derived probabilities against every overlapping expert exam.
 
     Expert NaNs are excluded per label. Derived NaNs are also excluded for
     that label. AUC is NaN when the overlap contains only one expert class;
     macro-AUC averages only defined per-label AUC values.
+
+    Optimistic threshold accuracy, sensitivity, and specificity are selected
+    and evaluated on the same exams. They are upper bounds, not estimates.
+    AUC uncertainty is a seeded 95% percentile bootstrap interval with 1,000
+    resamples by default.
 
     derived_positive_rate is the mean derived probability, while
     expert_positive_rate is the observed binary rate. Their signed difference
@@ -175,11 +227,16 @@ def evaluate_agreement(
             derived_rate = float("nan")
             expert_rate = float("nan")
         threshold, accuracy, sensitivity, specificity = _threshold_metrics(y_true, scores)
+        ci_lower, ci_upper = bootstrap_auc_ci(
+            y_true, scores, n_bootstrap=n_bootstrap, seed=seed
+        )
         difference = derived_rate - expert_rate
         rows.append(
             {
                 "label": label,
                 "n_overlap": n_overlap,
+                "n_positive": n_positive,
+                "n_negative": n_negative,
                 "expert_positive_count": n_positive,
                 "expert_negative_count": n_negative,
                 "expert_positive_rate": expert_rate,
@@ -187,10 +244,12 @@ def evaluate_agreement(
                 "positive_rate_difference": difference,
                 "signed_positive_rate_difference": difference,
                 "auc": _auc(y_true, scores),
+                "auc_ci_lower": ci_lower,
+                "auc_ci_upper": ci_upper,
                 "best_threshold": threshold,
-                "best_threshold_accuracy": accuracy,
-                "sensitivity": sensitivity,
-                "specificity": specificity,
+                "optimistic_accuracy": accuracy,
+                "optimistic_sensitivity": sensitivity,
+                "optimistic_specificity": specificity,
             }
         )
 
@@ -199,6 +258,9 @@ def evaluate_agreement(
     table["auc_rank"] = table["auc"].rank(
         method="min", ascending=False, na_option="bottom"
     ).astype("Int64")
+    table.attrs["note"] = RANKING_NOTE
+    table.attrs["auc_bootstrap_resamples"] = n_bootstrap
+    table.attrs["auc_bootstrap_seed"] = seed
     valid_auc = table["auc"].dropna()
     macro_auc = float(valid_auc.mean()) if not valid_auc.empty else float("nan")
     return AgreementResult(per_label=table, macro_auc=macro_auc, overlap_ids=overlap)
