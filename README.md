@@ -6,6 +6,8 @@ Scaffold and exploratory data analysis for the Kaggle RSNA Knee Abnormality Dete
 
 The verified schema is implemented in the central config. The data loaders, DICOM utilities, report normalization, synthetic fixture, and pytest coverage are now present; the EDA notebook remains for a later chunk.
 
+The authoritative, measured record of the dataset schema, label coverage, text constraints, and EDA implications is [docs/EDA_FINDINGS.md](docs/EDA_FINDINGS.md).
+
 The competition data is approximately 247 GB decompressed and will not be stored on a local computer or in this repository. The full dataset is mounted read-only inside a Kaggle notebook after the competition is attached.
 
 ## Planned layout
