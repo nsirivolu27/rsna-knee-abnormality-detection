@@ -103,7 +103,7 @@ src.config.DATA_ROOT auto-detects the two supported Kaggle mount layouts and pre
 
 src.dicom_io.exam_metadata() reads one header from a preferred sagittal series per exam (falling back to the first available series), producing full-corpus metadata with structured warning columns. Pass a parquet cache_path so the approximately 4,407 header reads happen once and the result can be reused as a Kaggle Dataset.
 
-src.site_proxy.build_site_proxy() creates the findings-defined site-proxy key from normalized manufacturer, model, rounded field strength, detected language, and report placeholder signature. Raw manufacturer spelling is preserved. Groups under the minimum size are visibly coarsened first to manufacturer-plus-language and then to language-only. src.splits.build_grouped_folds() treats the resulting key as atomic, so no group can span folds.
+src.site_proxy.build_site_proxy() creates the findings-defined site-proxy key from normalized manufacturer, model, rounded field strength, detected language, and report placeholder signature. Raw manufacturer spelling is preserved. The default minimum group size is 10. Roughly 84% of exams coarsen to manufacturer-plus-language, so this is not scanner-granularity grouping. Smaller groups are visibly coarsened first to manufacturer-plus-language and then to language-only. src.splits.build_grouped_folds() treats the resulting key as atomic, so no group can span folds.
 
 The 58 expert-labeled exams are flagged as is_expert_labeled and excluded from training folds by default. Fold prevalence is returned separately so class imbalance is visible rather than hidden.
 
