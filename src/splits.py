@@ -8,10 +8,11 @@ import numpy as np
 import pandas as pd
 
 from . import config
+from .labels import Labels, fully_labeled_exams, load_labels
 
 
 class SplitResult(NamedTuple):
-    """Exam assignments and label prevalence calculated on eligible folds."""
+    """Exam assignments and label prevalence for training and expert partitions."""
 
     assignments: pd.DataFrame
     label_prevalence: pd.DataFrame
@@ -33,27 +34,26 @@ def _coerce_exam_frame(frame: Any, name: str) -> pd.DataFrame:
     return result
 
 
-def _expert_ids(expert_labels: Any, frame: pd.DataFrame) -> set[str]:
-    if expert_labels is not None:
-        return set(_coerce_exam_frame(expert_labels, "expert_labels").index)
-    if "is_expert_labeled" in frame.columns:
-        return set(frame.index[frame["is_expert_labeled"].fillna(False).astype(bool)])
-    if all(label in frame.columns for label in config.TARGET_LABELS):
-        complete = frame.loc[:, config.TARGET_LABELS].notna().all(axis=1)
-        return set(frame.index[complete])
-    return set()
-
-
-def _label_frame(labels: Any, frame: pd.DataFrame) -> pd.DataFrame | None:
-    if labels is None:
-        if all(label in frame.columns for label in config.TARGET_LABELS):
-            return frame.loc[:, config.TARGET_LABELS]
-        return None
-    result = _coerce_exam_frame(labels, "labels")
-    missing = [label for label in config.TARGET_LABELS if label not in result.columns]
+def _coerce_labels(labels: Any) -> Labels:
+    if isinstance(labels, Labels):
+        return labels
+    frame = _coerce_exam_frame(labels, "labels")
+    missing = [label for label in config.TARGET_LABELS if label not in frame.columns]
     if missing:
         raise ValueError(f"labels are missing columns: {missing!r}")
-    return result.loc[:, config.TARGET_LABELS]
+    values = frame.loc[:, config.TARGET_LABELS].apply(pd.to_numeric, errors="coerce")
+    invalid = values.notna() & ~values.isin([0.0, 1.0])
+    if invalid.any().any():
+        label = next(column for column in values.columns if invalid[column].any())
+        exam_id = values.index[invalid[label].to_numpy().nonzero()[0][0]]
+        raise ValueError(f"Invalid label {label!r} at exam {exam_id!r}.")
+    return Labels(values=values, observed=values.notna())
+
+
+def _expert_ids(expert_labels: Any, labels: Labels) -> set[str]:
+    if expert_labels is not None:
+        return set(_coerce_exam_frame(expert_labels, "expert_labels").index)
+    return set(fully_labeled_exams(labels).index)
 
 
 def _group_token(value: object) -> str:
@@ -64,11 +64,13 @@ def _group_token(value: object) -> str:
 
 def _prevalence(
     assignments: pd.DataFrame,
-    labels: pd.DataFrame | None,
+    labels: Labels,
     n_splits: int,
 ) -> pd.DataFrame:
+    """Report rates using only non-NaN observations, including experts separately."""
     columns = [
         "fold",
+        "partition",
         "label",
         "n_exams",
         "n_observed",
@@ -76,15 +78,10 @@ def _prevalence(
         "n_negative",
         "positive_rate",
     ]
-    if labels is None:
-        return pd.DataFrame(columns=columns)
-
     rows: list[dict[str, object]] = []
-    for fold in range(n_splits):
-        ids = assignments.index[
-            (assignments["fold"] == fold) & assignments["training_eligible"]
-        ]
-        values = labels.reindex(ids)
+
+    def add_partition(ids: pd.Index, fold: object, partition: str) -> None:
+        values = labels.values.reindex(ids)
         for label in config.TARGET_LABELS:
             column = values[label]
             observed = column.notna()
@@ -94,6 +91,7 @@ def _prevalence(
             rows.append(
                 {
                     "fold": fold,
+                    "partition": partition,
                     "label": label,
                     "n_exams": len(ids),
                     "n_observed": n_observed,
@@ -104,6 +102,16 @@ def _prevalence(
                     ),
                 }
             )
+
+    for fold in range(n_splits):
+        ids = assignments.index[
+            (assignments["fold"] == fold) & assignments["training_eligible"]
+        ]
+        add_partition(ids, fold, "train")
+
+    expert_ids = assignments.index[assignments["is_expert_labeled"]]
+    if len(expert_ids):
+        add_partition(expert_ids, pd.NA, "expert")
     return pd.DataFrame(rows, columns=columns)
 
 
@@ -117,21 +125,37 @@ def build_grouped_folds(
     group_column: str = "site_proxy_key",
     exclude_expert: bool = True,
 ) -> SplitResult:
-    """Assign whole site-proxy groups to seeded folds.
+    """Assign whole site-proxy groups to seeded training folds.
 
-    The 58 fully labeled expert exams are marked in is_expert_labeled and,
-    by default, receive no training fold and are marked training_eligible=False.
-    The fallback behavior for small site-proxy groups is performed upstream by
-    src.site_proxy.build_site_proxy; this function treats the resulting key as
-    atomic and never splits one key across folds.
+    When labels is omitted, the function loads config.TRAIN_CSV and derives
+    is_expert_labeled from labels.fully_labeled_exams(). On the full corpus an
+    assertion requires exactly 58 complete exams. Those exams remain in the
+    assignments frame with fold=<NA>, training_eligible=False, and partition
+    reporting keeps their observed label prevalence separate from train folds.
+    Thus default training fold sizes sum to 4,349, not 4,407.
+
+    The resulting site-proxy key is treated as atomic and never split across
+    folds. Since the observed labels are concentrated in the excluded expert
+    partition, training-fold prevalence can have zero observed labels; the
+    separate expert partition preserves the measured rates without treating
+    NaN as negative.
     """
     if n_splits < 2:
         raise ValueError("n_splits must be at least 2.")
     if group_column not in site_proxy_frame.columns:
         raise ValueError(f"Missing grouping column {group_column!r}.")
 
+    loaded_default_labels = labels is None
+    label_source = load_labels() if loaded_default_labels else labels
+    label_object = _coerce_labels(label_source)
+    expert_id_set = _expert_ids(expert_labels, label_object)
+    if loaded_default_labels:
+        assert len(expert_id_set) == 58, (
+            "The full train.csv contract expects exactly 58 fully labeled exams; "
+            f"found {len(expert_id_set)}."
+        )
+
     frame = _coerce_exam_frame(site_proxy_frame, "site_proxy_frame")
-    expert_id_set = _expert_ids(expert_labels, frame)
     result = frame.copy()
     result["is_expert_labeled"] = result.index.to_series().isin(expert_id_set).to_numpy()
     result["training_eligible"] = ~result["is_expert_labeled"] if exclude_expert else True
@@ -159,7 +183,7 @@ def build_grouped_folds(
             fold_sizes[fold] += int(group_sizes[key])
         result.loc[eligible.index, "fold"] = group_tokens.map(group_to_fold).astype("Int64")
 
-    prevalence = _prevalence(result, _label_frame(labels, frame), n_splits)
+    prevalence = _prevalence(result, label_object, n_splits)
     return SplitResult(assignments=result, label_prevalence=prevalence)
 
 
