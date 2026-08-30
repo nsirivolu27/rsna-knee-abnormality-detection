@@ -210,6 +210,28 @@ def _key_component(value: object) -> object:
     return "unknown" if _is_missing(value) or str(value).strip() == "" else value
 
 
+
+
+def _merge_key_score(
+    source_full_key: tuple[object, ...],
+    target_full_key: tuple[object, ...],
+    target_size: int,
+    target_key: tuple[object, ...],
+) -> tuple[object, ...]:
+    """Score a candidate target under the documented deterministic merge rule."""
+    same_language = int(source_full_key[3] == target_full_key[3])
+    same_manufacturer = int(source_full_key[0] == target_full_key[0])
+    hamming_distance = sum(
+        left != right for left, right in zip(source_full_key, target_full_key)
+    )
+    return (
+        -same_language,
+        -same_manufacturer,
+        hamming_distance,
+        -target_size,
+        repr(target_key),
+    )
+
 def build_site_proxy(
     series_metadata: Optional[pd.DataFrame] = None,
     reports: Optional[pd.DataFrame] = None,
@@ -227,8 +249,11 @@ def build_site_proxy(
     At the default min_group_size=10, roughly 84% of exams coarsen to
     (normalized_manufacturer, detected_language), so folds are not grouped at
     scanner granularity. Smaller groups are assigned to that two-part key, then
-    to (detected_language,) if still too small. The original and assigned keys,
-    group size, and assignment level are all returned for auditability.
+    to (detected_language,) if still too small. Any group still under the
+    minimum is merged into a group already at the minimum, preferring the same
+    language, then manufacturer, then smallest five-part Hamming distance,
+    largest target, and lexical key as deterministic tie-breakers. Original,
+    assigned, merge-target, size, and assignment-level columns are returned.
     """
     if min_group_size < 1:
         raise ValueError("min_group_size must be at least 1.")
@@ -314,6 +339,56 @@ def build_site_proxy(
 
     result["site_proxy_key"] = assigned_keys
     result["site_proxy_assignment_level"] = assignment_levels
+
+    # Enforce the contract after both semantic fallbacks. Any remaining small
+    # group is merged into an already-large group. Candidates are ranked by:
+    # same language, same manufacturer, smallest Hamming distance on the full
+    # five-part key, largest target size, then lexical repr(target_key).
+    assigned_sizes = result["site_proxy_key"].value_counts(dropna=False)
+    representative_full_keys: dict[tuple[object, ...], tuple[object, ...]] = {}
+    for assigned_key in assigned_sizes.index:
+        member_rows = result.loc[
+            result["site_proxy_key"].map(lambda value: value == assigned_key)
+        ]
+        representative_full_keys[assigned_key] = min(
+            member_rows["full_site_proxy_key"].tolist(), key=repr
+        )
+
+    large_keys = [
+        key for key, size in assigned_sizes.items() if int(size) >= min_group_size
+    ]
+    merge_targets: dict[tuple[object, ...], tuple[object, ...]] = {}
+    for source_key, source_size in assigned_sizes.items():
+        if int(source_size) >= min_group_size:
+            merge_targets[source_key] = source_key
+            continue
+        if not large_keys:
+            raise ValueError(
+                "Cannot enforce min_group_size: no group reaches the minimum "
+                "after language fallback."
+            )
+        source_full_key = representative_full_keys[source_key]
+        target_key = min(
+            large_keys,
+            key=lambda candidate: _merge_key_score(
+                source_full_key,
+                representative_full_keys[candidate],
+                int(assigned_sizes[candidate]),
+                candidate,
+            ),
+        )
+        merge_targets[source_key] = target_key
+
+    original_assigned_keys = result["site_proxy_key"].tolist()
+    result["site_proxy_merge_target"] = [merge_targets[key] for key in original_assigned_keys]
+    result["site_proxy_merged_small"] = [
+        merge_targets[key] != key for key in original_assigned_keys
+    ]
+    result["site_proxy_assignment_level"] = [
+        "merged_nearest_larger" if merge_targets[key] != key else level
+        for key, level in zip(original_assigned_keys, result["site_proxy_assignment_level"])
+    ]
+    result["site_proxy_key"] = [merge_targets[key] for key in original_assigned_keys]
     result["site_proxy"] = result["site_proxy_key"].map(
         lambda key: "|".join(str(part) for part in key)
     )
@@ -336,6 +411,8 @@ def build_site_proxy(
         "full_site_proxy_key",
         "site_proxy_key",
         "site_proxy_assignment_level",
+        "site_proxy_merge_target",
+        "site_proxy_merged_small",
         "site_proxy",
         "site_proxy_group_size",
         "site_proxy_under_minimum",
