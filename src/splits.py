@@ -158,6 +158,11 @@ def build_grouped_folds(
     frame = _coerce_exam_frame(site_proxy_frame, "site_proxy_frame")
     result = frame.copy()
     result["is_expert_labeled"] = result.index.to_series().isin(expert_id_set).to_numpy()
+    if loaded_default_labels:
+        assert int(result["is_expert_labeled"].sum()) == 58, (
+            "The full site-proxy frame must contain exactly 58 expert exams; "
+            f"found {int(result["is_expert_labeled"].sum())}."
+        )
     result["training_eligible"] = ~result["is_expert_labeled"] if exclude_expert else True
     result["fold"] = pd.Series(pd.NA, index=result.index, dtype="Int64")
 
