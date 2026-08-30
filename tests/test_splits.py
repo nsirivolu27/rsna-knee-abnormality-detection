@@ -34,3 +34,26 @@ def test_grouped_folds_do_not_split_groups_and_exclude_experts():
     assert set(train_prevalence["fold"]) == {0, 1, 2}
     assert expert_prevalence["n_exams"].eq(1).all()
     assert expert_prevalence["positive_rate"].notna().all()
+
+
+def test_expert_flag_is_derived_from_complete_label_rows():
+    ids = [str(i) for i in range(8)]
+    site = pd.DataFrame(
+        {
+            config.EXAM_ID_COLUMN: ids,
+            "site_proxy_key": [("g0",)] * 2 + [("g1",)] * 2 + [("g2",)] * 2 + [("g3",)] * 2,
+        }
+    )
+    values = [[1.0] * len(config.TARGET_LABELS), [0.0] * len(config.TARGET_LABELS)]
+    values.extend([[float("nan")] * len(config.TARGET_LABELS) for _ in range(6)])
+    labels = pd.DataFrame(values, columns=config.TARGET_LABELS, index=ids).rename_axis(
+        config.EXAM_ID_COLUMN
+    )
+
+    result = build_grouped_folds(site, labels=labels, n_splits=3, seed=4)
+
+    assert int(result.assignments["is_expert_labeled"].sum()) == 2
+    assert int(result.assignments["training_eligible"].sum()) == 6
+    expert = result.label_prevalence[result.label_prevalence["partition"] == "expert"]
+    assert expert["n_exams"].eq(2).all()
+    assert expert["n_observed"].eq(2).all()
