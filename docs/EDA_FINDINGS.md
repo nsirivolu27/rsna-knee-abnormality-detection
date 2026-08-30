@@ -118,9 +118,10 @@ Language detected with `langdetect` on the first 400 characters of each report.
 
 Nine languages. Greek and Bulgarian are non-Latin script. No empty reports.
 
-The 58 labeled exams span all nine languages — en 28, es 10, tr 6, hr 4, bg 3,
-el 3, nl 2, de 2 — but with only 2–4 exams for de/nl/el/bg, extractor accuracy
-can be validated **only in aggregate**, never per language.
+The 58 labeled exams span **eight** of the nine languages — en 28, es 10, tr 6,
+hr 4, bg 3, el 3, nl 2, de 2. **French has zero labeled exams**, so French
+extraction can never be validated. With only 2–4 exams for de/nl/el/bg,
+extractor accuracy can be validated **only in aggregate**, never per language.
 
 ### Structure is unreliable
 
@@ -256,26 +257,58 @@ Every `[TIME]`-bearing signature is exclusively English. Dutch is 151/153
 `[DATE]`. Turkish, French and Croatian are effectively placeholder-free. This is
 the only proxy that separates English sub-sites.
 
-### 6.5 Recommended grouping key
+### 6.5 Grouping key — measured, not aspirational
 
-**38 distinct (manufacturer, model, field strength) combinations** in the
-200-exam sample. External sources describe 16–19 contributing sites, so several
-sites operate more than one scanner. Grouping by scanner is *finer* than
-grouping by site — the conservative direction for cross-validation.
+The five-part key `(normalized_manufacturer, model, MagneticFieldStrength,
+detected_language, placeholder_signature)` **does not survive contact with the
+corpus.** Measured over all 4,407 exams:
 
-Proposed CV group key:
+| min_group_size | groups | % keeping full key | smallest | median | largest | largest % | singletons |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 5 | 25 | 16.2 | 8 | 137 | 590 | 13.4 | 0 |
+| 10 | 25 | 16.0 | 8 | 137 | 590 | 13.4 | 0 |
+| 15 | 20 | 8.4 | 8 | 215 | 590 | 13.4 | 0 |
+| 20 | 19 | 8.4 | 24 | 220 | 590 | 13.4 | 0 |
+| 30 | 19 | 8.4 | 24 | 220 | 590 | 13.4 | 0 |
+
+Even at a threshold of 5, only 16% of exams retain the full key — it fragments
+into hundreds of combinations of 1–4 exams. The threshold is not a meaningful
+tuning knob; the ceiling is structural.
+
+**The realized grouping is two-part: `(normalized_manufacturer,
+detected_language)`.** Roughly 91% of exams coarsen to this level at
+min_group_size=30, 84% at min_group_size=10.
+
+**Decision: `min_group_size=10`** — 25 groups, no singletons, smallest group 8.
+
+**Why 5-fold CV is still viable.** The largest group is 590 exams; one fifth of
+the corpus is 881. No group is too large to sit inside a single fold, which is
+the constraint that would otherwise break grouped splitting.
+
+**What this costs.** Grouping by (manufacturer, language) is *coarser* than
+grouping by site — all Spanish Siemens sites collapse together. Coarser grouping
+makes CV stricter, not looser, so this errs safe on leakage. The real cost is
+fewer groups, which makes fold balance lumpier and CV estimates noisier.
+
+**Note on unmapped vendors.** `normalize_manufacturer` slugified two unrecognized
+vendor strings rather than failing — `FUJIFILM Healthcare Corporation` and
+`Hitachi Medical Corporation` (24 exams total) passed through as their own
+groups and coarsened all the way to language level. Both are one lineage
+(Fujifilm acquired Hitachi's diagnostic imaging business) and should map to
+`fujifilm`. Unrecognized vendors must warn, never pass through silently.
+
+### 6.6 Verified vendor counts (all 4,407 exams)
 
 ```
-(normalized_manufacturer, model, MagneticFieldStrength,
- detected_language, placeholder_signature)
+Siemens Healthineers 1053 | SIEMENS 804 | Siemens 94        -> siemens   1951
+Philips Medical Systems 718 | Philips 492 | Philips Hc 91   -> philips   1301
+GE MEDICAL SYSTEMS 868 | GEHC 37                            -> ge         905
+TOSHIBA 181 | CANON_MEC 45                                  -> canon      226
+FUJIFILM Healthcare 16 | Hitachi Medical 8                  -> fujifilm    24
 ```
 
-At ~4,400 exams over ~40 groups that averages ~110 exams per group, which
-supports 5-fold grouped splits.
-
-**Known weakness.** English exams spread thinly across 19 models with mostly
-empty placeholder signatures. English site attribution remains partial and
-should be stated as a limitation in any CV write-up.
+Sums to 4,407. Full-corpus DICOM metadata read in 76 seconds with zero
+unreadable exams.
 
 ---
 
@@ -298,34 +331,91 @@ Zero read warnings across 1,088 sampled series: the DICOM files are well formed.
 
 ## 8. Open questions
 
-### 8.1 Label definitions are not keyword presence *(the blocker)*
+### 8.1 RESOLVED — the labels do not come from the reports
 
-Two of the 58, read against their labels:
+All 58 labeled exams were read against their labels. Positive-exam counts
+reconcile exactly with `train.csv` for all twelve labels, so the analysis below
+rests on a correct parse.
 
-**Spanish exam** — positives `[PF OA, Effusion]`
-- "Leve derrame articular" (mild joint effusion) → **Effusion = 1**
-- "Amputación marginal del cuerpo del menisco lateral" → **Lateral Meniscus = 0**
+**Finding: no text rule can exist, because the labels are image-derived.**
 
-**English exam** — positives `[Lateral Meniscus, PF OA, Synovitis]`
-- "Horizontal tear at anterior horn of the lateral meniscus" → **Lateral Meniscus = 1**
-- "Moderate joint effusion, distended suprapatellar bursa" → **Effusion = 0**
+Several exams carry a positive label while the report states the opposite:
 
-The meniscus pair is explicable — the label likely means *tear* specifically,
-and marginal amputation is not a tear. The effusion pair is not: mild scores 1
-while moderate scores 0.
+| exam | label | report says |
+|---|---|---|
+| 57 | Baker's = 1 | explicitly no Baker cyst |
+| 41 | Lateral Meniscus = 1 | "Normaal voorkomen menisci" |
+| 51 | Lateral OA = 1 | "Cartilages normal" |
+| 22 | Medial OA = 1 | "Cartilage appears intact" |
 
-Either a strict clinical definition not yet found, or label noise in the only
-ground truth available. n=2, so do not over-conclude. Resolve by reading the
-competition's published labeling guideline (Data tab / Discussion) and auditing
-all 58 in `labeled_58.md`.
+No threshold or severity rule can turn a negative statement into a positive
+label. The ground truth was assigned by an expert panel **reading the images**.
+The reports are independent clinical documents written by different
+radiologists at 16–19 institutions under no shared protocol.
 
-**Nothing downstream of the extractor is safe to build until this is settled.**
+The contradictions are therefore report-versus-image disagreement, not
+annotation noise. Searching for exact operational rules is wasted effort.
 
-### 8.2 Evaluation metric
+### 8.2 Per-label extractability
+
+Derived from the 58. Treat as noisy guidance, not specification.
+
+**Relatively consistent**
+
+| label | apparent boundary | confidence |
+|---|---|---|
+| PF OA | moderate/high-grade patellofemoral disease, full-thickness loss, grade 3–4 chondromalacia positive; mild/superficial chondrosis negative | medium-high |
+| ACL | complete or high-grade tear positive; grade 1–2 sprain, mucoid degeneration mostly negative | medium |
+| MCL | grade II or greater positive; grade I sprain, thickening, edema negative | medium |
+| Baker's | explicitly named cyst usually positive; size threshold does not hold | low-medium |
+
+**Noisy weak signal:** Medial Meniscus, Lateral Meniscus, Medial OA, Lateral OA,
+Synovitis. Tear-versus-degeneration is visible on the medial side but breaks
+down laterally; OA compartment labels contain direct reversals.
+
+**No recoverable text rule:** Effusion, Contusion, Fracture.
+
+- Effusion: "Leve derrame articular" (mild) is positive in exam 1 and negative
+  in exam 35. "Moderate joint effusion" is negative in exam 2 while "Small joint
+  effusion" is positive in exam 9. No defensible threshold explains these.
+- Contusion: exam 20 uses "kemik kontüzyonu" verbatim and is negative; exam 6
+  says "no fracture or bone contusion" and is positive.
+- Fracture: exam 2 has an explicit osteochondral fracture and is negative; exam
+  14 has insufficiency fractures and is negative.
+
+### 8.3 Label relationships
+
+- Effusion and Synovitis co-occur positively in 22 exams but each appears
+  without the other frequently. Not equivalent.
+- Medial and lateral meniscus labels co-occur in 12 exams. Not exclusive.
+- The three OA compartment labels are not mutually exclusive.
+- No label is a strict prerequisite for another.
+
+### 8.4 Negation and uncertainty inventory
+
+| language | negation | uncertainty |
+|---|---|---|
+| en | intact, normal, preserved, without, no evidence of, no frank, not torn | suspect, R/O, likely, possible, cannot totally excluded |
+| es | sin, no hay, sin signos de, sin alteraciones, no impresiona | probablemente, podría |
+| tr | normal, korunmuş, seçilememiştir | uyumlu, düşündüren |
+| el | δεν παρατηρούνται, φυσιολογικά, χωρίς | πιθανής |
+| hr | bez znakova, održanog kontinuiteta | moguće, vjerojatno, najvjerojatnije |
+| bg | без данни за, запазен, нормално | — |
+| nl | normaal, zonder, geen | mogelijks |
+| de | intakt, ohne, kein, nicht sicher | möglicherweise, wohl |
+
+`intact` is unusable as a negation cue until the section 5 repair has run.
+
+### 8.5 Evaluation metric
 
 Probability-valued submission is consistent with an AUC metric, and a separate
 efficiency leaderboard is documented externally. Confirm both on the Evaluation
 tab.
+
+### 8.6 Still open
+
+The competition's published labeling guideline has not been read. It may define
+the panel's criteria explicitly and is worth finding before further inference.
 
 ---
 
@@ -333,26 +423,41 @@ tab.
 
 1. **Image-only at inference.** Reports are training-time supervision. Nothing
    in the inference path may touch text.
-2. **The pipeline is two-stage.** Report → labels (the hard, high-leverage
-   part), then images → labels. Extractor quality caps everything downstream.
-3. **NaN is unknown, never zero.** Label parsing returns an observed-mask
-   alongside values. Every count reported as positive / negative / missing —
-   never a bare mean over a column that is 98.7% NaN.
-4. **Negation handling is mandatory** in nine languages. "no evidence of
-   meniscal tear" and "meniscal tear" share the keyword. English alone contains
-   2,975 standalone uses of "intact".
-5. **Reports contain ordinary dictation typos** ("less thab 50%") in all nine
-   languages. Exact-match extraction will be brittle.
-6. **Group CV** by the section 6.5 key, never randomly.
-7. **`SeriesDescription` is for routing, not features.** It reliably encodes
-   sequence type, plane, fat suppression and matrix size, which makes it ideal
-   for *selecting* which series to feed the model. It must never be a model
-   input: it is a site fingerprint, and a model given it will learn the
-   institution rather than the pathology. The same caution applies to
-   Manufacturer, model and field strength.
-8. **Cross-check the provided series flags.** `Fluid_Sensitive`,
-   `Fat_Suppression` and `Anatomical_Plane` can be validated against
-   `SeriesDescription` tokens (`fs` / `SPAIR` / `we`; `sag` / `cor` / `tra`).
-   Quantify disagreement before trusting either source.
-9. **Lazy, per-exam DICOM access.** No function may glob the whole tree or
-   build an index requiring every file to be read.
+2. **Do not build a rule-based extractor.** Section 8.1 establishes that no
+   deterministic text rule can reproduce image-derived labels. Effort spent on
+   keyword and negation rules is capped well below useful accuracy.
+3. **Label generation is offline preprocessing, not part of the submission.**
+   The internet-off constraint applies only to the inference notebook. Labels
+   for the 4,349 unlabeled reports can be generated once by any strong LLM, run
+   anywhere, and saved as a Kaggle Dataset attached to training. Verify the
+   competition rules on external pretrained models before relying on this.
+4. **Ask for soft labels, not binaries.** A per-label probability carries
+   extraction uncertainty into training, which is the correct shape for noisy
+   supervision.
+5. **Measure per-label agreement against the 58.** That number estimates the
+   noise injected per label and identifies which labels are worth training on.
+6. **Systematic bias is worse than random noise.** If reports call mild effusion
+   "effusion" while the panel requires moderate-plus, derived labels are
+   systematically over-positive and the model inherits that shift against an
+   expert-labeled test set. Check per-label positive rates of derived labels
+   against the 58 and correct systematic offsets.
+7. **NaN is unknown, never zero.** Label parsing returns an observed-mask
+   alongside values. Counts reported as positive / negative / missing.
+8. **French has no labeled exams** (81 in the corpus). Any French extraction is
+   entirely unvalidated — state this as a limitation.
+9. **Reports contain ordinary dictation typos** ("less thab 50%") in all nine
+   languages. Exact-match extraction is brittle.
+10. **Group CV** by the section 6.5 key, never randomly.
+11. **`SeriesDescription` is for routing, not features.** It reliably encodes
+    sequence type, plane, fat suppression and matrix size, making it ideal for
+    *selecting* which series to feed the model. It must never be a model input:
+    it is a site fingerprint, and a model given it will learn the institution
+    rather than the pathology. Same caution for Manufacturer, model and field
+    strength.
+12. **Cross-check the provided series flags** against `SeriesDescription`
+    tokens (`fs` / `SPAIR` / `we`; `sag` / `cor` / `tra`) and quantify
+    disagreement before trusting either source.
+13. **Lazy, per-exam DICOM access.** No function may glob the whole tree or
+    build an index requiring every file to be read.
+14. **Never commit report text.** This repository is public and Kaggle
+    prohibits redistributing competition data.
