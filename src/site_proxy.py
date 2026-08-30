@@ -214,7 +214,7 @@ def build_site_proxy(
     series_metadata: Optional[pd.DataFrame] = None,
     reports: Optional[pd.DataFrame] = None,
     *,
-    min_group_size: int = 30,
+    min_group_size: int = 10,
 ) -> pd.DataFrame:
     """Build one site-proxy row per exam.
 
@@ -223,11 +223,11 @@ def build_site_proxy(
     per-exam mode. Reports may be the output of src.reports.load_reports or a
     frame containing Report.
 
-    The initial grouping key is exactly the findings-defined tuple:
-    (normalized_manufacturer, model, MagneticFieldStrength,
-    detected_language, placeholder_signature). Groups below min_group_size are
-    assigned to (normalized_manufacturer, detected_language), then to
-    (detected_language,) if still too small. The original and assigned keys,
+    The five-part key is aspirational, not the grouping that usually operates.
+    At the default min_group_size=10, roughly 84% of exams coarsen to
+    (normalized_manufacturer, detected_language), so folds are not grouped at
+    scanner granularity. Smaller groups are assigned to that two-part key, then
+    to (detected_language,) if still too small. The original and assigned keys,
     group size, and assignment level are all returned for auditability.
     """
     if min_group_size < 1:
@@ -321,7 +321,7 @@ def build_site_proxy(
     assigned_sizes = result["site_proxy_key"].value_counts(dropna=False)
     result["site_proxy_group_size"] = result["site_proxy_key"].map(assigned_sizes).astype(int)
     result["site_proxy_under_minimum"] = result["site_proxy_group_size"] < min_group_size
-    result["site_proxy_under_30"] = result["site_proxy_group_size"] < 30
+    result["site_proxy_under_10"] = result["site_proxy_group_size"] < 30
 
     ordered = [
         config.EXAM_ID_COLUMN,
@@ -348,7 +348,7 @@ def report_group_sizes(
     site_proxy_frame: pd.DataFrame,
     *,
     key_column: str = "site_proxy_key",
-    minimum: int = 30,
+    minimum: int = 10,
 ) -> pd.DataFrame:
     """Return group counts and flag groups smaller than minimum."""
     if minimum < 1:
@@ -362,7 +362,7 @@ def report_group_sizes(
         .reset_index()
     )
     sizes["under_minimum"] = sizes["exam_count"] < minimum
-    sizes["under_30"] = sizes["exam_count"] < 30
+    sizes["under_10"] = sizes["exam_count"] < 30
     return sizes.sort_values(
         ["under_minimum", "exam_count"], ascending=[False, True], ignore_index=True
     )
