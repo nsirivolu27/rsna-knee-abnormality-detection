@@ -25,5 +25,12 @@ def test_grouped_folds_do_not_split_groups_and_exclude_experts():
     assert not assignments.loc["0", "training_eligible"]
     for _, group in assignments[assignments["training_eligible"]].groupby("site_proxy_key"):
         assert group["fold"].nunique() == 1
-    assert set(result.label_prevalence["fold"]) == {0, 1, 2}
-    assert result.label_prevalence["positive_rate"].notna().all()
+    train_prevalence = result.label_prevalence[
+        result.label_prevalence["partition"] == "train"
+    ]
+    expert_prevalence = result.label_prevalence[
+        result.label_prevalence["partition"] == "expert"
+    ]
+    assert set(train_prevalence["fold"]) == {0, 1, 2}
+    assert expert_prevalence["n_exams"].eq(1).all()
+    assert expert_prevalence["positive_rate"].notna().all()
