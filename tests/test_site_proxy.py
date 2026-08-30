@@ -56,3 +56,13 @@ def test_language_fallback_remains_visible_when_still_small():
     assert result["site_proxy_assignment_level"].eq("language").all()
     assert result["site_proxy_under_minimum"].all()
     assert result["site_proxy_key"].map(len).eq(1).all()
+
+
+def test_operational_group_threshold_defaults_to_ten():
+    import inspect
+
+    from src.site_proxy import flag_small_groups, report_group_sizes
+
+    assert inspect.signature(build_site_proxy).parameters["min_group_size"].default == 10
+    assert inspect.signature(report_group_sizes).parameters["minimum"].default == 10
+    assert inspect.signature(flag_small_groups).parameters["minimum"].default == 10
