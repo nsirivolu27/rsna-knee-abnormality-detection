@@ -321,7 +321,7 @@ def build_site_proxy(
     assigned_sizes = result["site_proxy_key"].value_counts(dropna=False)
     result["site_proxy_group_size"] = result["site_proxy_key"].map(assigned_sizes).astype(int)
     result["site_proxy_under_minimum"] = result["site_proxy_group_size"] < min_group_size
-    result["site_proxy_under_10"] = result["site_proxy_group_size"] < 30
+    result["site_proxy_under_10"] = result["site_proxy_group_size"] < 10
 
     ordered = [
         config.EXAM_ID_COLUMN,
@@ -339,7 +339,7 @@ def build_site_proxy(
         "site_proxy",
         "site_proxy_group_size",
         "site_proxy_under_minimum",
-        "site_proxy_under_30",
+        "site_proxy_under_10",
     ]
     return result[[column for column in ordered if column in result.columns]]
 
@@ -362,7 +362,7 @@ def report_group_sizes(
         .reset_index()
     )
     sizes["under_minimum"] = sizes["exam_count"] < minimum
-    sizes["under_10"] = sizes["exam_count"] < 30
+    sizes["under_10"] = sizes["exam_count"] < 10
     return sizes.sort_values(
         ["under_minimum", "exam_count"], ascending=[False, True], ignore_index=True
     )
@@ -372,7 +372,7 @@ def flag_small_groups(
     site_proxy_frame: pd.DataFrame,
     *,
     key_column: str = "site_proxy_key",
-    minimum: int = 30,
+    minimum: int = 10,
 ) -> pd.DataFrame:
     """Alias for report_group_sizes with an explicit flag-oriented name."""
     return report_group_sizes(site_proxy_frame, key_column=key_column, minimum=minimum)
