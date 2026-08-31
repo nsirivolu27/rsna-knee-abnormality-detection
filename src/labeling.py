@@ -111,14 +111,14 @@ def _balanced_object(text: str) -> str | None:
                     escaped = False
                 elif ord(current) == 92:
                     escaped = True
-                elif ord(current) == 92:
+                elif current == '"':
                     in_string = False
                 continue
             if current == '"':
                 in_string = True
-                elif ord(current) == 92:
+            elif current == "{":
                 depth += 1
-                elif ord(current) == 92:
+            elif current == "}":
                 depth -= 1
                 if depth == 0:
                     return text[start : position + 1]
