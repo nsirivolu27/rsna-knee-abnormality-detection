@@ -57,3 +57,24 @@ def test_expert_flag_is_derived_from_complete_label_rows():
     expert = result.label_prevalence[result.label_prevalence["partition"] == "expert"]
     assert expert["n_exams"].eq(2).all()
     assert expert["n_observed"].eq(2).all()
+
+
+def test_default_label_assertion_is_skipped_for_a_subset(monkeypatch):
+    ids = [str(i) for i in range(4)]
+    values = [[1.0] * len(config.TARGET_LABELS)]
+    values.extend([[float("nan")] * len(config.TARGET_LABELS) for _ in range(3)])
+    labels = pd.DataFrame(values, columns=config.TARGET_LABELS, index=ids).rename_axis(
+        config.EXAM_ID_COLUMN
+    )
+    site = pd.DataFrame(
+        {
+            config.EXAM_ID_COLUMN: ids[:3],
+            "site_proxy_key": [("g0",), ("g1",), ("g2",)],
+        }
+    )
+    monkeypatch.setattr("src.splits.load_labels", lambda: labels)
+
+    result = build_grouped_folds(site, n_splits=2, seed=3)
+
+    assert int(result.assignments["is_expert_labeled"].sum()) == 1
+    assert int(result.assignments["training_eligible"].sum()) == 2
