@@ -149,19 +149,25 @@ def build_grouped_folds(
     label_source = load_labels() if loaded_default_labels else labels
     label_object = _coerce_labels(label_source)
     expert_id_set = _expert_ids(expert_labels, label_object)
-    if loaded_default_labels:
+
+    frame = _coerce_exam_frame(site_proxy_frame, "site_proxy_frame")
+    result = frame.copy()
+    full_corpus = (
+        loaded_default_labels
+        and len(result) == len(label_object.values)
+        and set(result.index) == set(label_object.values.index)
+    )
+    if full_corpus:
         assert len(expert_id_set) == 58, (
             "The full train.csv contract expects exactly 58 fully labeled exams; "
             f"found {len(expert_id_set)}."
         )
-
-    frame = _coerce_exam_frame(site_proxy_frame, "site_proxy_frame")
-    result = frame.copy()
     result["is_expert_labeled"] = result.index.to_series().isin(expert_id_set).to_numpy()
-    if loaded_default_labels:
-        assert int(result["is_expert_labeled"].sum()) == 58, (
+    if full_corpus:
+        n_expert = int(result["is_expert_labeled"].sum())
+        assert n_expert == 58, (
             "The full site-proxy frame must contain exactly 58 expert exams; "
-            f"found {int(result["is_expert_labeled"].sum())}."
+            f"found {n_expert}."
         )
     result["training_eligible"] = ~result["is_expert_labeled"] if exclude_expert else True
     result["fold"] = pd.Series(pd.NA, index=result.index, dtype="Int64")
