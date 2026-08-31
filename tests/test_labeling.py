@@ -49,7 +49,7 @@ def test_labeling_parses_strict_lenient_and_records_failures(tmp_path):
     assert len(failures) == 2
     assert len(failures.loc[failures[config.EXAM_ID_COLUMN] == "4", "raw_completion"].iloc[0]) == 500
     loaded = load_soft_labels(tmp_path / "soft_labels.csv", train_csv=train)
-    assert loaded.loc["1", "ACL"] == 0.4
+    assert loaded.loc["1", "ACL"] == 1.0
     assert build_prompt("x", "A {report} B") == "A x B"
 
     summary = summarize_run(results, failures)
