@@ -28,7 +28,7 @@ def test_labeling_parses_strict_lenient_and_records_failures(tmp_path):
     prompt.write_text("Report:\n{report}\n", encoding="utf-8")
     train = tmp_path / "train.csv"
     _reports().reset_index().to_csv(train, index=False)
-    fence = chr(96) * 3 + "json\n" + _payload(0.4, integer=True) + "\n" + chr(96) * 3
+    fence = chr(96) * 3 + "json\n" + _payload(1.0, integer=True) + "\n" + chr(96) * 3
     trailing = _payload(0.6).replace("}}", "},}")
     responses = [_payload(0.2), fence, trailing, _payload(1.2), "x" * 600]
 
@@ -43,7 +43,7 @@ def test_labeling_parses_strict_lenient_and_records_failures(tmp_path):
     assert results.loc[0, "parse_status"] == "parsed"
     assert results.loc[1, "parse_status"] == "parsed_lenient"
     assert results.loc[2, "parse_status"] == "parsed_lenient"
-    assert results.loc[1, "ACL"] == 0.4
+    assert results.loc[1, "ACL"] == 1.0
     assert results.loc[2, "ACL"] == 0.6
     assert np.isnan(results.loc[4, "ACL"])
     assert len(failures) == 2
