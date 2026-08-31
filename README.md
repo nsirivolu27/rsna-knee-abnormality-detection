@@ -4,7 +4,7 @@ Scaffold and exploratory data analysis for the Kaggle RSNA Knee Abnormality Dete
 
 ## Current status
 
-The verified schema, lazy DICOM utilities, report normalization, synthetic fixture, grouped site-proxy utilities, external soft-label loader, agreement metrics, and pytest coverage are present. The EDA notebook remains for a later chunk.
+The verified schema, lazy DICOM utilities, report normalization, synthetic fixture, grouped site-proxy utilities, resumable external soft-label runner, agreement metrics, and pytest coverage are present. The EDA notebook remains for a later chunk.
 
 The authoritative, measured record of the dataset schema, label coverage, text constraints, site proxies, and EDA implications is [docs/EDA_FINDINGS.md](docs/EDA_FINDINGS.md).
 
@@ -29,6 +29,7 @@ src/config.py is the single source of truth for paths, constants, and the verifi
 ├── README.md
 ├── requirements.txt
 ├── prompts/
+│   ├── README.md
 │   └── label_extraction_v1.md
 ├── src/
 │   ├── agreement.py
@@ -41,6 +42,8 @@ src/config.py is the single source of truth for paths, constants, and the verifi
 │   ├── site_proxy.py
 │   ├── soft_labels.py
 │   └── splits.py
+├── scripts/
+│   └── run_labeling.py
 ├── notebooks/
 │   ├── 01_eda.ipynb
 │   └── eda_findings.md
@@ -50,6 +53,7 @@ src/config.py is the single source of truth for paths, constants, and the verifi
     ├── test_data.py
     ├── test_dicom_io.py
     ├── test_labels.py
+    ├── test_labeling.py
     ├── test_reports.py
     ├── test_site_proxy.py
     ├── test_soft_labels.py
@@ -103,13 +107,13 @@ src.config.DATA_ROOT auto-detects the two supported Kaggle mount layouts and pre
 
 src.dicom_io.exam_metadata() reads one header from a preferred sagittal series per exam (falling back to the first available series), producing full-corpus metadata with structured warning columns. Pass a parquet cache_path so the approximately 4,407 header reads happen once and the result can be reused as a Kaggle Dataset.
 
-src.site_proxy.build_site_proxy() creates the findings-defined site-proxy key from normalized manufacturer, model, rounded field strength, detected language, and report placeholder signature. Raw manufacturer spelling is preserved. The default minimum group size is 10. Roughly 84% of exams coarsen to manufacturer-plus-language, so this is not scanner-granularity grouping. Smaller groups are visibly coarsened first to manufacturer-plus-language and then to language-only. src.splits.build_grouped_folds() treats the resulting key as atomic, so no group can span folds.
+src.site_proxy.build_site_proxy() creates the findings-defined site-proxy key from normalized manufacturer, model, rounded field strength, detected language, and report placeholder signature. Raw manufacturer spelling is preserved. The default minimum group size is 10. Roughly 84% of exams coarsen to manufacturer-plus-language, so this is not scanner-granularity grouping. Smaller groups are visibly coarsened first to manufacturer-plus-language and then to language-only; any residual under-minimum group is deterministically merged into an existing qualifying group and recorded in audit columns. src.splits.build_grouped_folds() treats the resulting key as atomic, so no group can span folds.
 
 By default, build_grouped_folds() loads train.csv and derives the 58 expert-labeled exams from the complete label rows. They remain in the assignment table for auditability but have fold=<NA> and training_eligible=False, so only 4,349 exams receive training folds. Their observed-label prevalence is reported in a separate expert partition; NaN remains unknown rather than negative.
 
 ## External soft labels and agreement
 
-External labels must contain one row per StudyInstanceUID, all twelve probability columns in [0, 1], and may include per-label confidence columns plus a rationale. src.soft_labels.load_soft_labels() validates IDs against train.csv, rejects duplicates and malformed rows, and does not commit or generate any label file.
+External labels must contain one row per StudyInstanceUID, all twelve probability columns in [0, 1], and may include per-label confidence columns plus a rationale. src.labeling.run_labeling() accepts an injected batch generator, normalizes reports before templating, records prompt filename/SHA-256 metadata, checkpoints incrementally, and resumes by skipping completed IDs. Parse failures remain NaN and are returned separately. src.soft_labels.load_soft_labels() validates IDs against train.csv, rejects duplicates and malformed rows, and does not commit or generate any label file.
 
 src.agreement.evaluate_agreement() compares those probabilities with the expert set on overlapping IDs. It reports per-label AUC with a seeded 1,000-resample 95% bootstrap interval, optimistic same-sample threshold metrics explicitly labeled as upper bounds, positive-rate bias, and macro-AUC. The AUC ranking notes that 9–35 expert positives per label make nearby differences difficult to distinguish.
 
