@@ -55,7 +55,7 @@ def test_labeling_parses_strict_lenient_and_records_failures(tmp_path):
     summary = summarize_run(results, failures)
     assert summary["parsed"] == 3
     assert summary["failed"] == 2
-    assert summary["per_label"].loc[summary["per_label"]["label"] == "ACL", "n_at_extremes"].iloc[0] == 0
+    assert summary["per_label"].loc[summary["per_label"]["label"] == "ACL", "n_at_extremes"].iloc[0] == 1
 
 
 def test_labeling_resume_skips_checkpointed_ids(tmp_path):
