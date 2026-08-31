@@ -45,3 +45,9 @@ build/
 .DS_Store
 .vscode/
 .idea/
+
+# Generated soft labels — derived from private report text
+soft_labels*.csv
+soft_labels*.parquet
+*_labels_*.csv
+*_labels_*.parquet
