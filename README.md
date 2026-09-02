@@ -71,6 +71,8 @@ src/config.py is the single source of truth for paths, constants, and the verifi
 
 `src.series_selection` routes each exam to at most one sagittal fluid-sensitive, coronal fluid-sensitive, axial fluid-sensitive, and sagittal T1 series. The measured full-corpus coverage is 94.1684%, 96.3921%, 100.0000%, and 96.8005%, respectively; missing slots remain explicit through `presence_mask`.
 
+`train_series.csv` contains no slice-count column. The selector accepts an optional caller-derived `slice_count`; without it, the slice-count criterion is explicitly unavailable and the UID tie-break is used. `slot_coverage` does not select winners and uses vectorized existence predicates.
+
 `src.dataset.ExamDataset` reads the small series CSV at construction and touches only the selected exam/series directories inside `__getitem__`. `src.preprocessing` returns fixed-shape float32 NumPy tensors after per-volume percentile normalization, deterministic depth sampling, and bilinear in-plane resizing. `src.cache.VolumeCache` stores one versioned exam tensor atomically; cache keys include the selected UIDs and preprocessing settings.
 
 The dataset wrapper is deliberately framework-neutral and returns `images`, `presence_mask`, selected UIDs, structured warnings, and optional `targets` plus `target_observed_mask`. It does not read reports or expose scanner/site metadata to the image path.
