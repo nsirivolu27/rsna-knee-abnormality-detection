@@ -419,7 +419,19 @@ the panel's criteria explicitly and is worth finding before further inference.
 
 ---
 
-## 8.7 Canonical image-slot coverage (all 4,407 exams)\n\nMeasured from train_series.csv using the four metadata-only canonical routing slots. Missing slots are retained as explicit missing inputs rather than causing an exam to be discarded.\n\n| slot | selected | missing | coverage |\n|---|---:|---:|---:|\n| sagittal fluid-sensitive | 4,150 | 257 | 94.1684% |\n| coronal fluid-sensitive | 4,248 | 159 | 96.3921% |\n| axial fluid-sensitive | 4,407 | 0 | 100.0000% |\n| sagittal T1 | 4,266 | 141 | 96.8005% |\n\nThe downstream sample contract must therefore include one presence mask per slot. Axial fluid-sensitive coverage is complete; the remaining slots have measurable gaps and must not be silently imputed or treated as negative evidence.\n## 9. Design implications
+## 8.7 Canonical image-slot coverage (all 4,407 exams)
+
+Measured from train_series.csv using the four metadata-only canonical routing slots. Missing slots are retained as explicit missing inputs rather than causing an exam to be discarded.
+
+| slot | selected | missing | coverage |
+|---|---:|---:|---:|
+| sagittal fluid-sensitive | 4,150 | 257 | 94.1684% |
+| coronal fluid-sensitive | 4,248 | 159 | 96.3921% |
+| axial fluid-sensitive | 4,407 | 0 | 100.0000% |
+| sagittal T1 | 4,266 | 141 | 96.8005% |
+
+The downstream sample contract must therefore include one presence mask per slot. Axial fluid-sensitive coverage is complete; the remaining slots have measurable gaps and must not be silently imputed or treated as negative evidence.
+## 9. Design implications
 
 1. **Image-only at inference.** Reports are training-time supervision. Nothing
    in the inference path may touch text.
