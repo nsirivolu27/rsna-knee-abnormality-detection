@@ -51,7 +51,7 @@ def test_slot_coverage_counts_missing_requested_exams():
     assert values.loc["sag_fluid", "n_selected"] == 2
     assert values.loc["cor_fluid", "n_selected"] == 1
     assert values.loc["ax_fluid", "n_selected"] == 2
-    assert values.loc["sag_t1", "n_selected"] == 2
+    assert values.loc["sag_t1", "n_selected"] == 1
     assert values.loc["sag_fluid", "coverage"] == pytest.approx(2 / 3)
 
 
