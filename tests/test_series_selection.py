@@ -1,4 +1,5 @@
 import pandas as pd
+import time
 import pytest
 
 from src import config
@@ -38,6 +39,9 @@ def test_select_series_applies_slot_rules_and_ties():
     tied["slice_count"] = 18
     assert select_series(tied, "e2")["sag_fluid"] == "sag2"
 
+    no_slice_counts = tied.drop(columns=["slice_count"])
+    assert select_series(no_slice_counts, "e2")["sag_fluid"] == "sag2"
+
 
 def test_select_series_returns_none_for_missing_slots():
     selected = select_series(_series_frame(), "missing")
@@ -60,3 +64,34 @@ def test_series_selection_rejects_duplicate_pairs():
     frame = pd.concat([frame, frame.iloc[[0]]], ignore_index=True)
     with pytest.raises(ValueError, match="duplicate exam/series"):
         select_series(frame, "e1")
+
+
+def test_slot_coverage_scales_to_5000_exams():
+    rows = []
+    for index in range(5000):
+        exam_id = f"exam-{index:05d}"
+        rows.extend(
+            [
+                [exam_id, f"{exam_id}-sag", 1, 1, "Sagittal"],
+                [exam_id, f"{exam_id}-cor", 1, 0, "Coronal"],
+                [exam_id, f"{exam_id}-ax", 1, 0, "Axial"],
+                [exam_id, f"{exam_id}-t1", 0, 0, "Sagittal"],
+            ]
+        )
+    frame = pd.DataFrame(
+        rows,
+        columns=[
+            config.EXAM_ID_COLUMN,
+            config.SERIES_ID_COLUMN,
+            config.FLUID_SENSITIVE_COLUMN,
+            config.FAT_SUPPRESSION_COLUMN,
+            config.ANATOMICAL_PLANE_COLUMN,
+        ],
+    )
+
+    started = time.perf_counter()
+    coverage = slot_coverage(frame)
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 2.0, f"slot_coverage took {elapsed:.3f}s"
+    assert coverage["n_selected"].tolist() == [5000, 5000, 5000, 5000]
