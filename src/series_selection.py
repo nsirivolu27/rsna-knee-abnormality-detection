@@ -115,6 +115,18 @@ def select_series(series_frame: pd.DataFrame, exam_id: str) -> dict[str, str | N
     return _select_prepared(frame, str(exam_id))
 
 
+def select_series_map(
+    series_frame: pd.DataFrame,
+    exam_ids: list[str] | tuple[str, ...] | pd.Index | None = None,
+) -> dict[str, dict[str, str | None]]:
+    """Select canonical slots for many exams while preparing metadata once."""
+    frame = _prepare_series_frame(series_frame)
+    if exam_ids is None:
+        ids = pd.Index(frame[config.EXAM_ID_COLUMN].drop_duplicates().astype(str))
+    else:
+        ids = pd.Index([str(exam_id) for exam_id in exam_ids]).drop_duplicates()
+    return {exam_id: _select_prepared(frame, exam_id) for exam_id in ids}
+
 def slot_coverage(
     series_frame: pd.DataFrame,
     exam_ids: list[str] | tuple[str, ...] | pd.Index | None = None,
