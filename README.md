@@ -4,7 +4,7 @@ Scaffold and exploratory data analysis for the Kaggle RSNA Knee Abnormality Dete
 
 ## Current status
 
-The verified schema, lazy DICOM utilities, report normalization, synthetic fixture, grouped site-proxy utilities, resumable external soft-label runner, agreement metrics, and pytest coverage are present. The EDA notebook remains for a later chunk.
+The verified schema, lazy DICOM utilities, report normalization, synthetic fixture, grouped site-proxy utilities, resumable external soft-label runner, agreement metrics, canonical four-slot routing, model-agnostic preprocessing, versioned cache, lazy framework-neutral exam dataset, and pytest coverage are present. The EDA notebook remains for a later chunk.
 
 The authoritative, measured record of the dataset schema, label coverage, text constraints, site proxies, and EDA implications is [docs/EDA_FINDINGS.md](docs/EDA_FINDINGS.md).
 
@@ -36,6 +36,10 @@ src/config.py is the single source of truth for paths, constants, and the verifi
 │   ├── config.py
 │   ├── data.py
 │   ├── dicom_io.py
+│   ├── preprocessing.py
+│   ├── cache.py
+│   ├── dataset.py
+│   ├── series_selection.py
 │   ├── fixture.py
 │   ├── labels.py
 │   ├── labeling.py
@@ -61,6 +65,13 @@ src/config.py is the single source of truth for paths, constants, and the verifi
     └── test_splits.py
 ~~~
 
+## Image loading contract
+
+`src.series_selection` routes each exam to at most one sagittal fluid-sensitive, coronal fluid-sensitive, axial fluid-sensitive, and sagittal T1 series. The measured full-corpus coverage is 94.1684%, 96.3921%, 100.0000%, and 96.8005%, respectively; missing slots remain explicit through `presence_mask`.
+
+`src.dataset.ExamDataset` reads the small series CSV at construction and touches only the selected exam/series directories inside `__getitem__`. `src.preprocessing` returns fixed-shape float32 NumPy tensors after per-volume percentile normalization, deterministic depth sampling, and bilinear in-plane resizing. `src.cache.VolumeCache` stores one versioned exam tensor atomically; cache keys include the selected UIDs and preprocessing settings.
+
+The dataset wrapper is deliberately framework-neutral and returns `images`, `presence_mask`, selected UIDs, structured warnings, and optional `targets` plus `target_observed_mask`. It does not read reports or expose scanner/site metadata to the image path.
 ## Environment and dependencies
 
 The dependency list uses minimum-version constraints rather than exact pins because Kaggle notebooks run a fixed image and hard pins can create conflicts. The standard Kaggle image is expected to provide NumPy, pandas, Matplotlib, seaborn, pydicom, and a parquet engine. pytest and nbstripout are local/Replit authoring tools used for tests and notebook hygiene.
