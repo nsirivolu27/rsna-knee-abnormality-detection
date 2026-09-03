@@ -1,111 +1,119 @@
 # RSNA Knee Abnormality Detection
 
-Scaffold and exploratory data analysis for the Kaggle RSNA Knee Abnormality Detection competition. This repository is intentionally limited to data inspection, DICOM/report loading utilities, site-aware validation, external soft-label validation, plotting helpers, and reproducible EDA. It does not contain model architectures, training loops, benchmarks, inference, or submission-writing code.
+## Research protocol and reproducible data scaffold
 
-## Current status
+This repository develops the data and evaluation foundation for studying **image-only multi-label recognition of twelve knee MRI abnormalities under weak supervision**.
 
-The verified schema, lazy DICOM utilities, report normalization, synthetic fixture, grouped site-proxy utilities, resumable external soft-label runner, agreement metrics, canonical four-slot routing, model-agnostic preprocessing, versioned cache, lazy framework-neutral exam dataset, and pytest coverage are present. The EDA notebook remains for a later chunk.
+The central methodological question is:
 
-The authoritative, measured record of the dataset schema, label coverage, text constraints, site proxies, and EDA implications is [docs/EDA_FINDINGS.md](docs/EDA_FINDINGS.md). The research framing is collected in [docs/RESEARCH_BRIEF.md](docs/RESEARCH_BRIEF.md). A standalone presentation is available as [docs/RESEARCH_BRIEF.html](docs/RESEARCH_BRIEF.html).
+> **Can an image-only learning system identify twelve image-derived abnormalities when complete expert labels are available for only a small validation partition, reports provide imperfect weak supervision, and acquisition structure can create validation leakage?**
 
-The competition data is approximately 247 GB decompressed and will not be stored on a local computer or in this repository. The full dataset is mounted read-only inside a Kaggle notebook after the competition is attached.
+This repository is a research scaffold, not a clinical diagnostic system. It does not establish diagnostic accuracy, clinical utility, calibration, external validity, or suitability for patient care.
 
-## Two-stage pipeline
+## Research framing
 
-The competition has two distinct stages:
+Read the full methods-first framing in the [Research Protocol Brief](docs/RESEARCH_BRIEF.md), or view the [standalone HTML presentation](docs/RESEARCH_BRIEF.html).
 
-1. **Offline report supervision:** reports from train.csv are sent to an external LLM workflow using prompts/label_extraction_v1.md. That workflow produces probability-valued soft labels and rationales outside this public repository. The prompt explicitly treats labels as image-derived and reports as potentially contradictory.
-2. **Image-only downstream work:** DICOM images are paired with those externally generated labels. Reports are not available in test.csv and must not be consumed by any inference path.
+The authoritative measured findings are maintained in [docs/EDA_FINDINGS.md](docs/EDA_FINDINGS.md). Every reported dataset number in that document was measured in Kaggle against the attached competition data; it is not inferred from the repository fixtures.
 
-There is deliberately **no rule-based text extractor** in this repository. No keyword or negation extraction logic should be added. The 58 fully labeled exams are an evaluation set for externally generated soft labels, not a training set.
+## Verified study setting
 
-## Layout
+| Quantity | Verified finding | Methodological implication |
+|---|---:|---|
+| Training examinations | 4,407 | The unit of analysis is `StudyInstanceUID` |
+| Fully expert-labeled examinations | 58 | Reserved for validation of report-derived supervision |
+| Training-eligible examinations | 4,349 | Unknown labels, not confirmed negatives |
+| Series rows | 24,371 | Multiple MRI series require deterministic routing |
+| Report languages | 9 | English-only text assumptions are not defensible |
+| Site-proxy groups | 24 | Validation must respect measured acquisition structure |
+| Forced residual group merges | 9 | Coarsening decisions are retained in audit columns |
+| DICOM metadata read | 4,407 exams; 0 unreadable | Lazy, per-examination access is feasible |
 
-src/config.py is the single source of truth for paths, constants, and the verified schema.
+The competition corpus is approximately 247 GB decompressed. It remains mounted in Kaggle and is not copied into this repository or onto a local computer.
 
-~~~text
-.
-├── .gitignore
-├── README.md
-├── requirements.txt
-├── prompts/
-│   ├── README.md
-│   └── label_extraction_v1.md
-├── src/
-│   ├── agreement.py
-│   ├── config.py
-│   ├── data.py
-│   ├── dicom_io.py
-│   ├── preprocessing.py
-│   ├── cache.py
-│   ├── dataset.py
-│   ├── series_selection.py
-│   ├── fixture.py
-│   ├── labels.py
-│   ├── labeling.py
-│   ├── reports.py
-│   ├── site_proxy.py
-│   ├── soft_labels.py
-│   └── splits.py
-├── scripts/
-│   └── run_labeling.py
-├── notebooks/
-│   ├── 01_eda.ipynb
-│   └── eda_findings.md
-└── tests/
-    ├── conftest.py
-    ├── test_agreement.py
-    ├── test_data.py
-    ├── test_dicom_io.py
-    ├── test_labels.py
-    ├── test_labeling.py
-    ├── test_reports.py
-    ├── test_site_proxy.py
-    ├── test_soft_labels.py
-    ├── test_splits.py
-    ├── test_series_selection.py
-    └── test_preprocessing_dataset.py
-~~~
+## Label provenance and weak supervision
 
-## Image loading contract
+The twelve labels are:
 
-`src.series_selection` routes each exam to at most one sagittal fluid-sensitive, coronal fluid-sensitive, axial fluid-sensitive, and sagittal T1 series. The measured full-corpus coverage is 94.1684%, 96.3921%, 100.0000%, and 96.8005%, respectively; missing slots remain explicit through `presence_mask`.
+```text
+ACL, MCL, Medial Meniscus, Lateral Meniscus, Medial OA, Lateral OA,
+PF OA, Effusion, Synovitis, Baker's, Contusion, Fracture
+```
 
-`train_series.csv` contains no slice-count column. The selector accepts an optional caller-derived `slice_count`; without it, the slice-count criterion is explicitly unavailable and the UID tie-break is used. `slot_coverage` does not select winners and uses vectorized existence predicates.
+The 58 complete label rows reproduce all twelve known positive counts. They are treated as an **expert validation partition**, not as a training set. The other 4,349 examinations have unknown labels; `NaN` is preserved as unknown and never converted to zero.
 
-`src.dataset.ExamDataset` reads the small series CSV at construction and touches only the selected exam/series directories inside `__getitem__`. `src.preprocessing` returns fixed-shape float32 NumPy tensors after per-volume percentile normalization, deterministic depth sampling, and bilinear in-plane resizing. `src.cache.VolumeCache` stores one versioned exam tensor atomically; cache keys include the selected UIDs and preprocessing settings.
+Reports are available during training but absent from the test input. They are treated as external weak-supervision material only:
 
-The dataset wrapper is deliberately framework-neutral and returns `images`, `presence_mask`, selected UIDs, structured warnings, and optional `targets` plus `target_observed_mask`. It does not read reports or expose scanner/site metadata to the image path.
-## Environment and dependencies
+1. An external LLM produces probability-valued labels from reports.
+2. Those soft labels are evaluated against the 58 expert examinations.
+3. An image model may use accepted soft labels during training.
+4. Inference uses images only.
 
-The dependency list uses minimum-version constraints rather than exact pins because Kaggle notebooks run a fixed image and hard pins can create conflicts. The standard Kaggle image is expected to provide NumPy, pandas, Matplotlib, seaborn, pydicom, and a parquet engine. pytest and nbstripout are local/Replit authoring tools used for tests and notebook hygiene.
+The repository intentionally contains no deterministic report keyword, section, negation, or rule-based extractor. The verified EDA documents direct report-versus-label reversals, so report text cannot be assumed to reproduce the image-derived labels.
 
-The EDA notebook is authored in this repository but is run **only as a Kaggle notebook** against the mounted competition data. It is not intended to run locally against the full dataset.
+## Image input contract
 
-For local smoke tests:
+The series table provides routing fields but no sequence names or scanner fields. The scaffold selects at most one series for each canonical slot:
 
-~~~bash
-pip install -r requirements.txt
-pytest
-~~~
+| Canonical slot | Routing rule | Full-corpus coverage |
+|---|---|---:|
+| Sagittal fluid-sensitive | Sagittal + fluid-sensitive; prefer fat suppression | 4,150 / 4,407 (94.1684%) |
+| Coronal fluid-sensitive | Coronal + fluid-sensitive; prefer fat suppression | 4,248 / 4,407 (96.3921%) |
+| Axial fluid-sensitive | Axial + fluid-sensitive; prefer fat suppression | 4,407 / 4,407 (100.0000%) |
+| Sagittal T1 | Sagittal + non-fluid-sensitive | 4,266 / 4,407 (96.8005%) |
 
-## Notebook hygiene
+Missing slots are represented by an explicit `presence_mask`. Missingness is not negative evidence.
 
-The committed EDA notebook must have all cell outputs cleared. Before committing notebook changes, run:
+`train_series.csv` has five columns and no slice-count field. The selector accepts an optional caller-derived `slice_count`; when it is absent, the slice-count criterion is unavailable and lexicographic `SeriesInstanceUID` ordering resolves ties. Coverage measurement does not perform tie-breaking.
 
-~~~bash
-nbstripout notebooks/01_eda.ipynb
-~~~
+The image path does not expose manufacturer, scanner model, field strength, station, institution, or `SeriesDescription` as model inputs. These variables may be useful for routing or leakage analysis, but they are not pathology features in this scaffold.
 
-The written EDA takeaways will also be maintained in notebooks/eda_findings.md so conclusions are reviewable in a normal text diff.
+## Leakage-aware validation
 
-## Using the package on Kaggle
+A site proxy is a measured grouping construct, not a confirmed institution identifier. It combines available DICOM and report-derived signals, including normalized manufacturer/model information, rounded field strength, report language, and placeholder signatures.
 
-The cleanest workflow is to publish this repository as a Kaggle Dataset containing the source tree, then attach that dataset and the competition dataset to the EDA notebook. The competition data remains read-only and is never copied into this repository.
+The verified five-fold assignment contains **869, 865, 870, 880, and 865 training-eligible examinations**. The 58 expert examinations remain auditable but have no training fold. No site-proxy group crosses folds.
 
-In the first notebook cell, replace the repository Dataset slug with the actual slug and set the data root before importing project modules:
+This is a conservative internal validation design. It does not establish generalization to another hospital, scanner, patient population, or clinical workflow.
 
-~~~python
+## Repository scope
+
+Implemented:
+
+- Verified schema and path handling for both supported Kaggle mount layouts
+- Lazy, per-examination DICOM loading with structured warnings
+- Deterministic canonical series selection
+- Fixed-shape, model-agnostic preprocessing
+- Versioned atomic caching of preprocessed exam tensors
+- Framework-neutral lazy exam dataset returning image and missingness masks
+- Label loading that preserves `NaN` and exposes observed masks
+- External soft-label parsing, checkpointing, provenance, and agreement evaluation
+- Acquisition-proxy construction and grouped folds
+- Synthetic DICOM fixtures and pytest coverage
+
+Deliberately out of scope:
+
+- Model architectures
+- Training loops
+- Benchmark or leaderboard claims
+- Inference and submission generation
+- Clinical deployment or clinical decision support
+- Rule-based report extraction
+
+## Reproducibility workflow
+
+### Kaggle data access
+
+The competition data is expected to be attached in Kaggle. The code supports both observed mount layouts:
+
+```text
+/kaggle/input/competitions/rsna-knee-abnormality-detection
+/kaggle/input/rsna-knee-abnormality-detection
+```
+
+Set the root before importing project modules when using an uploaded repository Dataset:
+
+```python
 import os
 import sys
 from pathlib import Path
@@ -115,49 +123,44 @@ sys.path.insert(0, str(repo_root))
 os.environ["RSNA_KNEE_DATA_ROOT"] = "/kaggle/input/competitions/rsna-knee-abnormality-detection"
 
 from src import config
-~~~
+```
 
-src.config.DATA_ROOT auto-detects the two supported Kaggle mount layouts and prefers the competitions/ form. The environment variable is available for the local subset override described below. After import, modules should read paths and constants from src.config; notebook cells should not scatter /kaggle/input/... paths throughout the analysis.
+`src.config` auto-detects the supported roots and centralizes all paths and schema constants.
 
-## Site-aware validation
+### Local tests
 
-src.dicom_io.exam_metadata() reads one header from a preferred sagittal series per exam (falling back to the first available series), producing full-corpus metadata with structured warning columns. Pass a parquet cache_path so the approximately 4,407 header reads happen once and the result can be reused as a Kaggle Dataset.
+The standard authoring workflow is:
 
-src.site_proxy.build_site_proxy() creates the findings-defined site-proxy key from normalized manufacturer, model, rounded field strength, detected language, and report placeholder signature. Raw manufacturer spelling is preserved. The default minimum group size is 10. Roughly 84% of exams coarsen to manufacturer-plus-language, so this is not scanner-granularity grouping. Smaller groups are visibly coarsened first to manufacturer-plus-language and then to language-only; any residual under-minimum group is deterministically merged into an existing qualifying group and recorded in audit columns. src.splits.build_grouped_folds() treats the resulting key as atomic, so no group can span folds.
+```bash
+pip install -r requirements.txt
+pytest
+```
 
-By default, build_grouped_folds() loads train.csv and derives the 58 expert-labeled exams from the complete label rows. They remain in the assignment table for auditability but have fold=<NA> and training_eligible=False, so only 4,349 exams receive training folds. Their observed-label prevalence is reported in a separate expert partition; NaN remains unknown rather than negative.
+The synthetic fixture is for loader development only. It is not a substitute for the Kaggle EDA data.
 
-## External soft labels and agreement
+### Local subset
 
-External labels must contain one row per StudyInstanceUID, all twelve probability columns in [0, 1], and may include per-label confidence columns plus a rationale. src.labeling.run_labeling() accepts an injected batch generator, normalizes reports before templating, records prompt filename/SHA-256 metadata, checkpoints incrementally, and resumes by skipping completed IDs. Parse failures remain NaN and are returned separately. src.soft_labels.load_soft_labels() validates IDs against train.csv, rejects duplicates and malformed rows, and does not commit or generate any label file.
+For loader development, export only approximately 20–50 selected examinations from Kaggle, including their needed DICOM files and small tabular context. Extract the subset under `local_subset/` and set:
 
-src.agreement.evaluate_agreement() compares those probabilities with the expert set on overlapping IDs. It reports per-label AUC with a seeded 1,000-resample 95% bootstrap interval, optimistic same-sample threshold metrics explicitly labeled as upper bounds, positive-rate bias, and macro-AUC. The AUC ranking notes that 9–35 expert positives per label make nearby differences difficult to distinguish.
-
-## Generating a small local subset
-
-A local subset is for developing and smoke-testing loaders only, not for running the EDA conclusions. To make one without downloading the full competition:
-
-1. Attach the competition to a Kaggle notebook.
-2. Select approximately 20–50 exams after the verified exam identifier and directory layout are known.
-3. Copy only those exams, including their needed DICOM files and small tabular context, from the read-only competition mount into a directory under /kaggle/working.
-4. Compress that working directory and download the resulting archive.
-5. Extract it locally under the configured LOCAL_SUBSET_ROOT directory.
-
-Do not run an unrestricted recursive copy or a competition-wide download.
-
-For local loader development, set the override before importing src.config:
-
-~~~python
+```python
 import os
 from pathlib import Path
 
 os.environ["RSNA_KNEE_DATA_ROOT"] = str(Path("local_subset"))
-~~~
+```
 
-## DICOM handling policy
+Never perform an unrestricted recursive copy of the competition tree.
 
-Any code that touches DICOM pixels must be lazy and per-exam. It must not load the complete dataset, glob the entire DICOM tree, or build an index that requires reading every DICOM file. The synthetic fixture exists only to make pytest runnable in the local authoring environment; it is not an EDA data substitute.
+### Notebook hygiene
 
-## Data safety
+The committed EDA notebook must be output-free:
 
-Do not commit DICOM files, report text, generated labels, competition downloads, model weights, caches, or credentials. The 58-report attachment and any externally generated label file are working material only.
+```bash
+nbstripout notebooks/01_eda.ipynb
+```
+
+Written findings belong in `notebooks/eda_findings.md` and the authoritative `docs/EDA_FINDINGS.md` so conclusions remain reviewable in ordinary text diffs.
+
+## Data governance
+
+Do not commit competition DICOM files, report text, generated labels, model weights, caches, credentials, or downloaded competition archives. The repository is intended to contain methods, utilities, tests, and measured findings—not redistributed competition data.
