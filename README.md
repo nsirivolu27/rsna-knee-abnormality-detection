@@ -6,7 +6,7 @@ Scaffold and exploratory data analysis for the Kaggle RSNA Knee Abnormality Dete
 
 The verified schema, lazy DICOM utilities, report normalization, synthetic fixture, grouped site-proxy utilities, resumable external soft-label runner, agreement metrics, canonical four-slot routing, model-agnostic preprocessing, versioned cache, lazy framework-neutral exam dataset, and pytest coverage are present. The EDA notebook remains for a later chunk.
 
-The authoritative, measured record of the dataset schema, label coverage, text constraints, site proxies, and EDA implications is [docs/EDA_FINDINGS.md](docs/EDA_FINDINGS.md).
+The authoritative, measured record of the dataset schema, label coverage, text constraints, site proxies, and EDA implications is [docs/EDA_FINDINGS.md](docs/EDA_FINDINGS.md). The research framing is collected in [docs/RESEARCH_BRIEF.md](docs/RESEARCH_BRIEF.md).
 
 The competition data is approximately 247 GB decompressed and will not be stored on a local computer or in this repository. The full dataset is mounted read-only inside a Kaggle notebook after the competition is attached.
 
