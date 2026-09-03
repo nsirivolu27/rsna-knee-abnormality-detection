@@ -76,6 +76,13 @@ The verified five-fold assignment contains **869, 865, 870, 880, and 865 trainin
 
 This is a conservative internal validation design. It does not establish generalization to another hospital, scanner, patient population, or clinical workflow.
 
+## Limitations and interpretation boundaries
+
+- Only 58 examinations have complete expert labels, limiting precision for per-label agreement estimates.
+- Report-derived labels are noisy weak supervision, not a reference standard.
+- The site variable is a measured acquisition proxy, not a confirmed institution identifier.
+- The cohort is internal to a competition dataset; there is no external validation or clinical endpoint.
+- The current work does not establish diagnostic accuracy, calibration, clinical utility, or suitability for patient care.
 ## Repository scope
 
 Implemented:
