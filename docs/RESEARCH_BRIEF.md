@@ -1,82 +1,139 @@
-# RSNA Knee Abnormality Detection — Research Brief
+# RSNA Knee Abnormality Detection — Research Protocol Brief
 
-> **Problem framing:** How can we build a reliable image-only system for twelve knee abnormalities when almost all exams lack expert labels, clinical reports disagree with image-derived ground truth, and the MRI corpus is too large to move locally?
+## Study question
 
-This brief turns the verified EDA into a research problem, an evidence base, and an implementation boundary. It is intentionally not a model proposal or a claim of leaderboard performance.
+**Among knee MRI examinations, can an image-only multi-label learning system identify twelve image-derived abnormalities when direct expert labels are available for only a small validation partition and the remaining exams require report-derived weak supervision?**
 
-## 1. The problem we are actually solving
+This is a methodological study of weak supervision, sequence selection, and leakage-aware evaluation. It is **not** a clinical diagnostic validation study, a prospective study, or evidence of clinical utility.
 
-The apparent task is multi-label MRI classification. The measured task is different: construct a defensible weak-supervision pipeline for 4,349 exams whose twelve labels are unknown, while preserving a small expert-labeled partition for validation and preventing acquisition-site leakage.
+## Clinical and methodological rationale
 
-The system must answer three linked questions:
+The competition is superficially framed as multi-label classification. The verified data structure creates a more specific research problem:
 
-1. **What can supervise training?** Reports exist for training exams, but labels were assigned from images and report text contains contradictions.
-2. **Which image evidence should enter the model?** The series table supplies routing flags, but each exam has multiple sequences and nonuniform slot availability.
-3. **How do we measure generalization honestly?** Scanner and language proxies cluster exams, so random folds risk learning acquisition identity instead of pathology.
+- The corpus contains **4,407 examinations**, but only **58 examinations have all twelve expert labels**.
+- The remaining **4,349 examinations are training-eligible but have unknown labels**.
+- The twelve labels were assigned from images. Reports are available during training but absent from the test input and contain documented contradictions with the image-derived labels.
+- Each examination contains multiple MRI series, with measurable variation in the availability of canonical sequences.
+- Scanner and language-related variables form acquisition proxies that can cluster examinations and create optimistic random-split estimates.
 
-## 2. Verified evidence
+The central question is therefore not simply whether a model can fit images. It is whether an evidence-preserving pipeline can create and evaluate image supervision without confusing report language, acquisition site, or sequence availability with pathology.
 
-| Finding | Measurement | Design consequence |
-|---|---:|---|
-| Training exams | 4,407 | Keep the full corpus indexed without copying DICOM locally |
-| Fully labeled exams | 58 | Reserve as expert validation; do not train on them |
-| Training-eligible exams | 4,349 | Use reports only for external weak-label generation |
-| Report languages | 9 | Do not assume an English-only extractor |
-| Site-proxy groups | 24 | Group folds by measured proxy, not random exam ID |
-| Forced residual merges | 9 | Preserve merge audit columns and inspect group behavior |
-| DICOM metadata reads | 4,407 exams, 0 unreadable | Lazy per-exam access is viable |
+## Aims
 
-### Canonical image-slot coverage
+### Primary methodological aim
 
-| Slot | Selected | Missing | Coverage |
-|---|---:|---:|---:|
-| Sagittal fluid-sensitive | 4,150 | 257 | 94.1684% |
-| Coronal fluid-sensitive | 4,248 | 159 | 96.3921% |
-| Axial fluid-sensitive | 4,407 | 0 | 100.0000% |
-| Sagittal T1 | 4,266 | 141 | 96.8005% |
+To establish a reproducible pipeline for image-only modeling that preserves uncertainty in weak labels, represents sequence missingness explicitly, and prevents measured acquisition-proxy groups from crossing validation folds.
 
-The missingness is part of the data contract. A missing sequence is not a negative finding, so every slot is paired with a presence mask.
+### Secondary aims
 
-## 3. Research hypotheses
+1. Quantify agreement between externally generated report-derived soft labels and the 58-examination expert partition.
+2. Measure the availability of four canonical MRI input slots using only the verified series-routing fields.
+3. Define a lazy, fixed-shape DICOM loading path that does not require copying or indexing the approximately 247 GB corpus locally.
+4. Identify limitations that must be resolved before any model performance is interpreted as clinically meaningful.
 
-- **H1 — Soft labels can unlock image training:** an external LLM can turn reports into probability-valued supervision, but agreement must be measured against the 58 expert exams before those labels are trusted.
-- **H2 — Image routing should be metadata-light:** the provided plane/fluid/fat-suppression flags can select canonical inputs without exposing scanner or institution identity to the model.
-- **H3 — Site-aware validation is necessary:** measured scanner/language proxies are strong enough that random folds would overstate generalization.
-- **H4 — Explicit missingness is safer than forced completion:** slot masks allow downstream work to distinguish an absent sequence from a low-signal image or a negative label.
+## Data provenance and unit of analysis
 
-## 4. Proposed evidence-preserving pipeline
+The unit of analysis is the **examination**, identified by `StudyInstanceUID`. The verified competition files contain:
 
-```text
-train.csv reports ──external LLM──> soft labels ──agreement check──┐
-                                                                  │
-train_series.csv ──metadata routing──> four canonical slots ──────┼──> image-only training
-DICOM series ──lazy per-exam load──> normalize/sample/resize ─────┘
+- `train.csv`: 4,407 examination rows and twelve label columns.
+- `train_series.csv`: 24,371 series rows with `StudyInstanceUID`, `SeriesInstanceUID`, `Fluid_Sensitive`, `Fat_Suppression`, and `Anatomical_Plane`.
+- DICOM files organized by examination, series, and instance identifiers.
+- Reports in `train.csv`; reports are absent from `test.csv`.
 
-site proxies ──grouped folds──> leakage-aware evaluation
-presence masks ───────────────> explicit sequence missingness
-```
+The full corpus remains mounted in Kaggle. It is not copied into this repository or into a local computer. The repository contains utilities and synthetic fixtures, not competition DICOM or report data.
 
-The repository currently implements the evidence-preserving front half: verified loading, lazy DICOM access, deterministic routing, fixed-shape preprocessing, caching, label masks, external soft-label validation, and grouped splits. Architectures, training loops, benchmarks, inference, and submissions remain deliberately out of scope.
+## Label provenance
 
-## 5. What the research rules out
+The twelve labels are:
 
-- No deterministic report keyword or negation extractor: labels are image-derived and the reports contain direct reversals.
-- No report text at inference: `test.csv` has no reports, and the intended downstream system is image-only.
-- No random cross-validation: acquisition proxies can create deceptively easy folds.
-- No scanner metadata as model features: manufacturer, model, field strength, and descriptions are routing/leakage signals, not pathology evidence.
-- No conversion of `NaN` to zero: unknown labels remain unknown and carry an observed mask.
-- No full-tree DICOM indexing: access is bounded to the requested exam and selected series.
+`ACL`, `MCL`, `Medial Meniscus`, `Lateral Meniscus`, `Medial OA`, `Lateral OA`, `PF OA`, `Effusion`, `Synovitis`, `Baker's`, `Contusion`, and `Fracture`.
 
-## 6. Next research gates
+The 58 complete rows reproduce all twelve known positive counts exactly. They are treated as an **expert validation partition**, not as a training sample. The other 4,349 rows are not treated as confirmed negatives; their label state is unknown.
 
-1. Validate the external soft-label generator against all 58 expert exams with per-label AUC, uncertainty intervals, bias, and macro-AUC.
-2. Run the canonical loader on the 20–50 exam local subset, including incomplete-slot and malformed-DICOM cases.
-3. Inspect cache reproducibility and memory behavior before introducing any model framework.
-4. Only then choose a training design that consumes image tensors, slot presence masks, and soft-label observation masks.
+This distinction is essential. Reports are external weak-supervision material, not a replacement reference standard. The planned supervision sequence is:
 
-## 7. Source of truth
+1. An external LLM produces probability-valued labels from reports.
+2. Those soft labels are evaluated against the 58 expert examinations.
+3. An image model may use the accepted soft labels during training.
+4. Inference uses images only; reports are not an input.
 
-- [Verified EDA findings](EDA_FINDINGS.md)
-- [Canonical series selector](../src/series_selection.py)
-- [Preprocessing contract](../src/preprocessing.py)
-- [Lazy exam dataset](../src/dataset.py)
+No deterministic keyword, section, or negation extractor is part of the design. Direct report-versus-label reversals show that a text rule cannot be assumed to recover the image-derived reference labels.
+
+## Image input definition
+
+Four canonical slots are routed from `train_series.csv`:
+
+| Slot | Selection rule | Full-corpus coverage |
+|---|---|---:|
+| Sagittal fluid-sensitive | Sagittal + fluid-sensitive; prefer fat suppression | 4,150 / 4,407 (94.1684%) |
+| Coronal fluid-sensitive | Coronal + fluid-sensitive; prefer fat suppression | 4,248 / 4,407 (96.3921%) |
+| Axial fluid-sensitive | Axial + fluid-sensitive; prefer fat suppression | 4,407 / 4,407 (100.0000%) |
+| Sagittal T1 | Sagittal + non-fluid-sensitive | 4,266 / 4,407 (96.8005%) |
+
+A missing slot is not interpreted as a negative finding. The dataset contract therefore returns a per-slot presence mask. The selector does not expose manufacturer, scanner model, field strength, station, institution, or `SeriesDescription` to the image-facing interface.
+
+`train_series.csv` has no slice-count field. The selector accepts an optional caller-derived `slice_count` only when available; otherwise all candidates tie at that criterion and lexicographic `SeriesInstanceUID` ordering is used. Coverage measurement does not perform winner selection or tie-breaking.
+
+Preprocessing is deliberately model-agnostic: per-volume robust intensity scaling, deterministic depth sampling, and bilinear in-plane resizing produce fixed-shape `float32` arrays. Missing slots use explicit zero placeholders together with the presence mask; they are not treated as negative evidence.
+
+## Leakage-aware validation plan
+
+A site proxy is not a confirmed institution identifier. It is a measured grouping construct derived from available DICOM metadata, normalized manufacturer/model information, rounded field strength, report-language information, and report-placeholder signatures. The full-corpus audit produced **24 proxy groups**, with **9 deterministic residual merges** recorded in audit columns.
+
+The planned five-fold assignment has fold sizes of **869, 865, 870, 880, and 865** among training-eligible examinations. The 58 expert examinations remain auditable but have no training fold. The grouping check passed: no proxy group crosses folds.
+
+This design estimates performance under the observed acquisition grouping more conservatively than random examination-level splitting. It does not establish generalization to an external hospital, scanner vendor, population, or clinical workflow.
+
+## Prespecified weak-label evaluation
+
+Agreement between report-derived probabilities and expert labels will be summarized by:
+
+- Per-label ROC-AUC with a seeded 1,000-resample 95% bootstrap interval.
+- Macro-AUC across labels with available evaluation support.
+- Positive-rate bias relative to the expert partition.
+- Threshold metrics explicitly identified as same-sample, optimistic upper bounds rather than independent clinical performance estimates.
+- Separate accounting for parse failures; failures remain `NaN` and are never replaced with 0.5.
+
+The small expert partition contains only 9–35 positives per label. Consequently, close AUC values should not be interpreted as reliably different without considering interval width and label prevalence.
+
+## What can and cannot be concluded
+
+### Supported by the current work
+
+- The verified schema and label counts are internally consistent.
+- Lazy, per-examination DICOM access is feasible; the full metadata pass read 4,407 exams with zero unreadable exams.
+- Canonical sequence availability is measurable and nonuniform.
+- Acquisition-proxy grouping changes the validation design and has been audited.
+- Unknown labels and missing sequences can be represented explicitly rather than coerced into negatives.
+
+### Not established by the current work
+
+- Diagnostic accuracy, sensitivity, specificity, calibration, clinical utility, or reader agreement.
+- External validity beyond this competition cohort.
+- Whether report-derived soft labels improve image-model performance.
+- Whether the site proxy adequately captures all acquisition dependence.
+- Whether any model would be safe or appropriate for clinical use.
+
+## Limitations and threats to validity
+
+1. **Reference-label scarcity:** only 58 examinations have complete expert labels, limiting precision for per-label agreement estimates.
+2. **Weak-label uncertainty:** reports are heterogeneous, multilingual, and sometimes contradict the image-derived labels.
+3. **Proxy uncertainty:** the grouping key approximates acquisition site; it is not a verified institution identifier.
+4. **Spectrum and sampling:** the competition cohort may not represent the prevalence, protocols, or patient mix of a clinical service.
+5. **No external validation:** all current findings are internal to the competition data.
+6. **No clinical endpoint:** the labels are examination-level abnormalities, not patient outcomes or treatment decisions.
+7. **Unresolved guideline question:** the competition labeling guideline should be reviewed before making clinical interpretations of individual labels.
+
+## Research gates before modeling claims
+
+1. Complete soft-label agreement analysis on all 58 expert examinations.
+2. Test the loader on a 20–50 examination local subset, including missing slots and malformed-DICOM cases.
+3. Verify preprocessing and cache reproducibility, memory usage, and fold isolation.
+4. Define an analysis plan for missingness, label support, and uncertainty before selecting a model framework.
+5. Report any downstream model only with the expert/weak-label distinction, grouped validation scheme, and limitations above.
+
+## Implemented repository boundary
+
+The repository currently provides verified data loading, lazy DICOM utilities, deterministic canonical routing, model-agnostic preprocessing, versioned caching, explicit image and label masks, external soft-label validation, and grouped folds. Model architectures, training loops, benchmark claims, inference, and submission generation remain outside this research brief.
+
+See [EDA findings](EDA_FINDINGS.md) for the measured source record and the implementation references in [the README](../README.md).
