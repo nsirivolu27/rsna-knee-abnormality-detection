@@ -35,13 +35,22 @@ sixteen to twenty two cross sectional slices through the knee. Different series
 are taken in different orientations and with different settings, and each one
 makes certain tissues stand out.
 
-The pipeline moves a scan through four stages, with a fifth stage to come.
+The pipeline moves a scan through six stages. Five are built.
 
 ```
-   MRI files  ->  Read  ->  Route  ->  Normalize  ->  [ Learn ]  ->  Probabilities
-    (DICOM)                                               |
-                                                    Training labels
-                                                    from the reports
+  ┌──────────┐   ┌───────┐   ┌───────────┐   ┌───────┐   ┌─────────┐   ┌────────────┐
+  │  1 READ  │──▶│ 2 ROUTE│──▶│ 3 NORMALIZE│──▶│ 4 CACHE│──▶│ 5 PREDICT│──▶│ 6 SUBMIT   │
+  │  DICOM   │   │ 4 slots│   │ fixed shape│   │  .npz  │   │  model   │   │submission  │
+  │ → volume │   │ per exam│  │ + rescale  │   │        │   │          │   │   .csv     │
+  └──────────┘   └───────┘   └───────────┘   └───────┘   └─────────┘   └────────────┘
+   dicom_io      series_       preprocessing    cache       inference      submission
+                 selection                                     ▲
+                                                               │
+                                              ┌────────────────┴────────────────┐
+                                              │  TRAINING LABELS (not yet run)  │
+                                              │  reports → labeling.py →        │
+                                              │  soft_labels → agreement        │
+                                              └─────────────────────────────────┘
 ```
 
 **1. Read.** Medical scanners save images in a format called DICOM, one file per
@@ -72,11 +81,27 @@ magnet strengths, slice thicknesses, and brightness scales. MRI has no absolute
 brightness units at all, so the same tissue can appear at completely different
 values on two machines. This stage resizes every volume to a common size, pads
 or trims to a fixed number of slices, and rescales brightness so scans from
-different hospitals become comparable. Results are stored in a cache so this
-expensive work happens once.
+different hospitals become comparable.
 
-**4. Learn.** Not yet built. A model will be trained to recognize each of the
-twelve findings from the normalized volumes.
+**4. Cache.** Preprocessing is the expensive part, so the result is written to
+disk keyed by the exam, the series chosen, and the exact settings used. Change
+any setting and the cache key changes, so stale volumes can never be silently
+reused.
+
+**5. Predict.** A predictor is handed one prepared exam and returns twelve
+probabilities. The predictor is passed in rather than hard wired, which keeps
+the model choice out of the pipeline and lets the whole path be tested without
+one. If a single exam cannot be read, or the model raises on it, that exam falls
+back to a default and the run continues. A crash partway through costs the whole
+submission; one fallback row costs one exam.
+
+**6. Submit.** The answer file has an unforgiving format: exact column names in
+exact order, one row per test exam, every value a finite probability. That
+contract lives in one module and is checked before anything is written.
+
+There is no trained model yet, so the current predictor returns each label's
+base rate. It cannot rank exams and therefore scores at chance, which is the
+honest result for a pipeline check.
 
 ## The interesting problem
 
@@ -125,13 +150,15 @@ would work at a hospital outside this dataset.
 
 | Stage | Status |
 |---|---|
-| Reading DICOM and gathering scan settings | Working. All 4,407 exams, 76 seconds, no failures |
-| Choosing which series to use | Working, coverage measured |
-| Normalizing and caching volumes | Working |
+| 1. Reading DICOM and scan settings | Working. All 4,407 exams, 76 seconds, no failures |
+| 2. Choosing which series to use | Working, coverage measured |
+| 3. Normalizing volumes | Working |
+| 4. Caching | Working |
+| 5. Prediction loop | Working, with a placeholder predictor |
+| 6. Submission file | Working, validated |
 | Grouped validation splits | Working, zero leakage |
 | Deriving labels from reports | Runner built, not yet run at scale |
-| Model | Not started |
-| Producing a submission file | Not started |
+| Trained model | Not started |
 
 ## Running it
 
@@ -159,6 +186,26 @@ Tests run anywhere, with no scan data present:
 pytest
 ```
 
+## Producing a submission
+
+From a Kaggle notebook with the competition data attached and **internet
+disabled**:
+
+```python
+import sys; sys.path.insert(0, "/kaggle/input/<your-repo-dataset>")
+from scripts.run_submission import main
+
+submission, diagnostics = main()
+```
+
+It reads the test exam list, runs every exam through stages 1 to 5, checks the
+result against the submission contract, and writes `submission.csv`. The
+diagnostics frame reports, per exam, whether images were read and how many of
+the four viewpoints were found.
+
+Because the submission notebook cannot reach the internet, the repository has to
+be attached as a Kaggle Dataset rather than cloned.
+
 ## Repository map
 
 ```
@@ -168,6 +215,8 @@ src/
   preprocessing.py     resizing, slice handling, brightness normalization
   cache.py             stores processed volumes
   dataset.py           feeds volumes to the model
+  inference.py         runs the prediction loop over exams
+  submission.py        builds and checks the answer file
   reports.py           cleans up radiology report text
   labels.py            loads the 58 expert labeled exams
   labeling.py          runs an external model over reports, resumably
@@ -177,7 +226,8 @@ src/
   splits.py            builds validation splits that respect hospitals
   data.py              exam index joining the tables and folders
   config.py            paths, label names, seed
-scripts/run_labeling.py  entry point for the labeling run
+scripts/run_labeling.py    entry point for the labeling run
+scripts/run_submission.py  entry point for producing a submission
 prompts/                 versioned label extraction templates
 docs/                    research brief and measured findings
 tests/                   run without any scan data
