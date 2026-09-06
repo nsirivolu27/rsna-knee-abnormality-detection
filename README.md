@@ -1,173 +1,197 @@
-# RSNA Knee Abnormality Detection
+# Knee MRI Abnormality Detection
 
-## Research protocol and reproducible data scaffold
+An image processing system that reads knee MRI scans and estimates how likely
+each of twelve common knee problems is to be present.
 
-This repository develops the data and evaluation foundation for studying **image-only multi-label recognition of twelve knee MRI abnormalities under weak supervision**.
+Built for the RSNA 2026 challenge on Kaggle, using 4,407 real knee examinations
+collected from around nineteen hospitals worldwide.
 
-The central methodological question is:
+This is a research scaffold, not a clinical tool. It does not establish
+diagnostic accuracy or suitability for patient care.
 
-> **Can an image-only learning system identify twelve image-derived abnormalities when complete expert labels are available for only a small validation partition, reports provide imperfect weak supervision, and acquisition structure can create validation leakage?**
+---
 
-This repository is a research scaffold, not a clinical diagnostic system. It does not establish diagnostic accuracy, clinical utility, calibration, external validity, or suitability for patient care.
+## What it looks for
 
-## Research framing
+Twelve findings, scored independently for every scan:
 
-Read the full methods-first framing in the [Research Protocol Brief](docs/RESEARCH_BRIEF.md), or view the [standalone HTML presentation](docs/RESEARCH_BRIEF.html).
+| | |
+|---|---|
+| **Ligaments** | ACL tear, MCL tear |
+| **Cartilage discs** | Medial meniscus tear, lateral meniscus tear |
+| **Joint wear** | Medial, lateral, and kneecap (patellofemoral) osteoarthritis |
+| **Inflammation** | Joint effusion, synovitis, Baker's cyst |
+| **Bone injury** | Bone bruise (contusion), fracture |
 
-The authoritative measured findings are maintained in [docs/EDA_FINDINGS.md](docs/EDA_FINDINGS.md). Every reported dataset number in that document was measured in Kaggle against the attached competition data; it is not inferred from the repository fixtures.
+The output is a probability between 0 and 1 for each one, not a yes or no
+answer. A radiologist reading the same scan would talk in terms of confidence
+too.
 
-## Verified study setting
+## How the system works
 
-| Quantity | Verified finding | Methodological implication |
-|---|---:|---|
-| Training examinations | 4,407 | The unit of analysis is `StudyInstanceUID` |
-| Fully expert-labeled examinations | 58 | Reserved for validation of report-derived supervision |
-| Training-eligible examinations | 4,349 | Unknown labels, not confirmed negatives |
-| Series rows | 24,371 | Multiple MRI series require deterministic routing |
-| Report languages | 9 | English-only text assumptions are not defensible |
-| Site-proxy groups | 24 | Validation must respect measured acquisition structure |
-| Forced residual group merges | 9 | Coarsening decisions are retained in audit columns |
-| DICOM metadata read | 4,407 exams; 0 unreadable | Lazy, per-examination access is feasible |
+An MRI examination is not a single picture. Each exam in this dataset contains
+about five and a half separate scan series, and each series is a stack of
+sixteen to twenty two cross sectional slices through the knee. Different series
+are taken in different orientations and with different settings, and each one
+makes certain tissues stand out.
 
-The competition corpus is approximately 247 GB decompressed. It remains mounted in Kaggle and is not copied into this repository or onto a local computer.
+The pipeline moves a scan through four stages, with a fifth stage to come.
 
-## Label provenance and weak supervision
-
-The twelve labels are:
-
-```text
-ACL, MCL, Medial Meniscus, Lateral Meniscus, Medial OA, Lateral OA,
-PF OA, Effusion, Synovitis, Baker's, Contusion, Fracture
+```
+   MRI files  ->  Read  ->  Route  ->  Normalize  ->  [ Learn ]  ->  Probabilities
+    (DICOM)                                               |
+                                                    Training labels
+                                                    from the reports
 ```
 
-The 58 complete label rows reproduce all twelve known positive counts. They are treated as an **expert validation partition**, not as a training set. The other 4,349 examinations have unknown labels; `NaN` is preserved as unknown and never converted to zero.
+**1. Read.** Medical scanners save images in a format called DICOM, one file per
+slice, along with technical details about how the scan was taken. The system
+loads a stack of these into a single 3D volume and records the settings that
+came with it. All 4,407 exams read in about seventy six seconds with no
+failures.
 
-Reports are available during training but absent from the test input. They are treated as external weak-supervision material only:
+**2. Route.** Not every series is useful for every finding. A fluid sensitive
+sagittal scan makes joint fluid glow bright and shows the meniscus clearly. A
+coronal scan is the one that shows the inner and outer compartments side by
+side. The system picks four fixed viewpoints per exam so the model always sees
+the same kinds of images.
 
-1. An external LLM produces probability-valued labels from reports.
-2. Those soft labels are evaluated against the 58 expert examinations.
-3. An image model may use accepted soft labels during training.
-4. Inference uses images only.
+| Viewpoint | Available in |
+|---|---:|
+| Axial, fluid sensitive | 100.0% of exams |
+| Sagittal T1 | 96.8% |
+| Coronal, fluid sensitive | 96.4% |
+| Sagittal, fluid sensitive | 94.2% |
 
-The repository intentionally contains no deterministic report keyword, section, negation, or rule-based extractor. The verified EDA documents direct report-versus-label reversals, so report text cannot be assumed to reproduce the image-derived labels.
+When a viewpoint is missing it is marked as missing rather than filled with
+blank images, so the model can tell the difference between "nothing there" and
+"we did not look".
 
-## Image input contract
+**3. Normalize.** Real hospital scans vary enormously. Different machines,
+magnet strengths, slice thicknesses, and brightness scales. MRI has no absolute
+brightness units at all, so the same tissue can appear at completely different
+values on two machines. This stage resizes every volume to a common size, pads
+or trims to a fixed number of slices, and rescales brightness so scans from
+different hospitals become comparable. Results are stored in a cache so this
+expensive work happens once.
 
-The series table provides routing fields but no sequence names or scanner fields. The scaffold selects at most one series for each canonical slot:
+**4. Learn.** Not yet built. A model will be trained to recognize each of the
+twelve findings from the normalized volumes.
 
-| Canonical slot | Routing rule | Full-corpus coverage |
-|---|---|---:|
-| Sagittal fluid-sensitive | Sagittal + fluid-sensitive; prefer fat suppression | 4,150 / 4,407 (94.1684%) |
-| Coronal fluid-sensitive | Coronal + fluid-sensitive; prefer fat suppression | 4,248 / 4,407 (96.3921%) |
-| Axial fluid-sensitive | Axial + fluid-sensitive; prefer fat suppression | 4,407 / 4,407 (100.0000%) |
-| Sagittal T1 | Sagittal + non-fluid-sensitive | 4,266 / 4,407 (96.8005%) |
+## The interesting problem
 
-Missing slots are represented by an explicit `presence_mask`. Missingness is not negative evidence.
+Only 58 of the 4,407 exams come with expert labels. The other 4,349 have no
+labels at all.
 
-`train_series.csv` has five columns and no slice-count field. The selector accepts an optional caller-derived `slice_count`; when it is absent, the slice-count criterion is unavailable and lexicographic `SeriesInstanceUID` ordering resolves ties. Coverage measurement does not perform tie-breaking.
+What they do have is the original radiology report, written by the doctor who
+read the scan at the time, in one of nine languages. So the plan is to read
+training labels out of those reports and use them to teach the model.
 
-The image path does not expose manufacturer, scanner model, field strength, station, institution, or `SeriesDescription` as model inputs. These variables may be useful for routing or leakage analysis, but they are not pathology features in this scaffold.
+That turns out to be harder than it sounds. The expert labels were assigned by a
+panel looking at the images, not by reading the reports, and the two sometimes
+disagree outright. One exam is labeled as having a Baker's cyst in a report that
+says there is no cyst. Another says "mild joint effusion" and is labeled
+positive, while a different exam says "moderate joint effusion" and is labeled
+negative.
 
-## Leakage-aware validation
+So a large part of this project is measuring how much of the truth actually
+survives in the written reports, finding by finding, and being honest about
+which of the twelve can be learned this way and which cannot.
 
-A site proxy is a measured grouping construct, not a confirmed institution identifier. It combines available DICOM and report-derived signals, including normalized manufacturer/model information, rounded field strength, report language, and placeholder signatures.
+Because a rule based reader cannot solve this, the repository contains no
+keyword, section, or negation extractor by design. Labels are produced
+externally as probabilities and then scored against the 58 expert exams.
 
-The verified five-fold assignment contains **869, 865, 870, 880, and 865 training-eligible examinations**. The 58 expert examinations remain auditable but have no training fold. No site-proxy group crosses folds.
+## Keeping the model honest
 
-This is a conservative internal validation design. It does not establish generalization to another hospital, scanner, patient population, or clinical workflow.
+Scans from the same hospital look alike. Same scanner, same settings, same
+habits. A model can learn to recognize the hospital instead of the injury, and
+then score well in testing while being useless on a new hospital's scans.
 
-## Limitations and interpretation boundaries
+Two safeguards are built in:
 
-- Only 58 examinations have complete expert labels, limiting precision for per-label agreement estimates.
-- Report-derived labels are noisy weak supervision, not a reference standard.
-- The site variable is a measured acquisition proxy, not a confirmed institution identifier.
-- The cohort is internal to a competition dataset; there is no external validation or clinical endpoint.
-- The current work does not establish diagnostic accuracy, calibration, clinical utility, or suitability for patient care.
-## Repository scope
+- Scanner manufacturer, model, magnet strength and scan descriptions are used
+  only to decide which images to feed the model. They are never given to the
+  model itself.
+- Validation splits are grouped so that every scan from a given hospital and
+  language lands in the same split. The five folds hold 869, 865, 870, 880 and
+  865 exams, and no group crosses a fold. The 58 expert exams sit outside the
+  training folds entirely.
 
-Implemented:
+This is conservative internal validation. It does not establish that the system
+would work at a hospital outside this dataset.
 
-- Verified schema and path handling for both supported Kaggle mount layouts
-- Lazy, per-examination DICOM loading with structured warnings
-- Deterministic canonical series selection
-- Fixed-shape, model-agnostic preprocessing
-- Versioned atomic caching of preprocessed exam tensors
-- Framework-neutral lazy exam dataset returning image and missingness masks
-- Label loading that preserves `NaN` and exposes observed masks
-- External soft-label parsing, checkpointing, provenance, and agreement evaluation
-- Acquisition-proxy construction and grouped folds
-- Synthetic DICOM fixtures and pytest coverage
+## Where the project stands
 
-Deliberately out of scope:
+| Stage | Status |
+|---|---|
+| Reading DICOM and gathering scan settings | Working. All 4,407 exams, 76 seconds, no failures |
+| Choosing which series to use | Working, coverage measured |
+| Normalizing and caching volumes | Working |
+| Grouped validation splits | Working, zero leakage |
+| Deriving labels from reports | Runner built, not yet run at scale |
+| Model | Not started |
+| Producing a submission file | Not started |
 
-- Model architectures
-- Training loops
-- Benchmark or leaderboard claims
-- Inference and submission generation
-- Clinical deployment or clinical decision support
-- Rule-based report extraction
+## Running it
 
-## Reproducibility workflow
-
-### Kaggle data access
-
-The competition data is expected to be attached in Kaggle. The code supports both observed mount layouts:
-
-```text
-/kaggle/input/competitions/rsna-knee-abnormality-detection
-/kaggle/input/rsna-knee-abnormality-detection
-```
-
-Set the root before importing project modules when using an uploaded repository Dataset:
+The full dataset is 247 GB and is never downloaded. Everything runs against
+Kaggle's read only copy, which is mounted at either of two paths depending on
+how the data was attached. The code handles both.
 
 ```python
-import os
-import sys
-from pathlib import Path
+# In a Kaggle notebook with the competition data attached, Internet ON
+!git clone -q https://github.com/nsirivolu27/rsna-knee-abnormality-detection.git /kaggle/working/repo
+import sys; sys.path.insert(0, "/kaggle/working/repo")
 
-repo_root = Path("/kaggle/input/<uploaded-repository-dataset>")
-sys.path.insert(0, str(repo_root))
-os.environ["RSNA_KNEE_DATA_ROOT"] = "/kaggle/input/competitions/rsna-knee-abnormality-detection"
+import pandas as pd
+from src import config, dicom_io, site_proxy, splits
 
-from src import config
+scans = dicom_io.exam_metadata(cache_path="/kaggle/working/exam_metadata.parquet")
+groups = site_proxy.build_site_proxy(series_metadata=scans,
+                                     reports=pd.read_csv(config.TRAIN_CSV))
+folds = splits.build_grouped_folds(groups, n_splits=5, seed=42)
 ```
 
-`src.config` auto-detects the supported roots and centralizes all paths and schema constants.
-
-### Local tests
-
-The standard authoring workflow is:
+Tests run anywhere, with no scan data present:
 
 ```bash
-pip install -r requirements.txt
 pytest
 ```
 
-The synthetic fixture is for loader development only. It is not a substitute for the Kaggle EDA data.
+## Repository map
 
-### Local subset
-
-For loader development, export only approximately 20–50 selected examinations from Kaggle, including their needed DICOM files and small tabular context. Extract the subset under `local_subset/` and set:
-
-```python
-import os
-from pathlib import Path
-
-os.environ["RSNA_KNEE_DATA_ROOT"] = str(Path("local_subset"))
+```
+src/
+  dicom_io.py          reads scan files and their settings
+  series_selection.py  picks which scans to use
+  preprocessing.py     resizing, slice handling, brightness normalization
+  cache.py             stores processed volumes
+  dataset.py           feeds volumes to the model
+  reports.py           cleans up radiology report text
+  labels.py            loads the 58 expert labeled exams
+  labeling.py          runs an external model over reports, resumably
+  soft_labels.py       loads and validates labels derived from reports
+  agreement.py         measures derived labels against the expert ones
+  site_proxy.py        works out which hospital a scan probably came from
+  splits.py            builds validation splits that respect hospitals
+  data.py              exam index joining the tables and folders
+  config.py            paths, label names, seed
+scripts/run_labeling.py  entry point for the labeling run
+prompts/                 versioned label extraction templates
+docs/                    research brief and measured findings
+tests/                   run without any scan data
 ```
 
-Never perform an unrestricted recursive copy of the competition tree.
+## Documentation
 
-### Notebook hygiene
+- [`docs/RESEARCH_BRIEF.md`](docs/RESEARCH_BRIEF.md) the methods first framing
+- [`docs/EDA_FINDINGS.md`](docs/EDA_FINDINGS.md) everything measured about the
+  dataset, and the source of every number quoted above
 
-The committed EDA notebook must be output-free:
+## Scope
 
-```bash
-nbstripout notebooks/01_eda.ipynb
-```
-
-Written findings belong in `notebooks/eda_findings.md` and the authoritative `docs/EDA_FINDINGS.md` so conclusions remain reviewable in ordinary text diffs.
-
-## Data governance
-
-Do not commit competition DICOM files, report text, generated labels, model weights, caches, credentials, or downloaded competition archives. The repository is intended to contain methods, utilities, tests, and measured findings—not redistributed competition data.
+This is a research competition entry, not a medical device. Nothing here is
+validated for patient care and no output should be read as a diagnosis. The
+scans are de identified and stay on Kaggle's platform under the competition
+terms. Report text is never copied into this repository.
