@@ -1,0 +1,55 @@
+# Dataset files — never commit competition data
+data/
+local_subset/
+labeled_58.md
+*_reports.md
+*.dcm
+*.DCM
+*.nii
+*.nii.gz
+*.zip
+*.tar
+*.tar.gz
+
+# Model artifacts and caches
+models/
+weights/
+checkpoints/
+cache/
+*.npz
+*.pt
+*.pth
+*.ckpt
+*.onnx
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Local environments and secrets
+.venv/
+venv/
+.env
+.env.*
+
+# Replit-specific files
+.replit
+replit.nix
+.local/
+.agents/
+
+# Packaging and editor noise
+*.egg-info/
+dist/
+build/
+.DS_Store
+.vscode/
+.idea/
+
+# Generated soft labels — derived from private report text
+soft_labels*.csv
+soft_labels*.parquet
+*_labels_*.csv
+*_labels_*.parquet

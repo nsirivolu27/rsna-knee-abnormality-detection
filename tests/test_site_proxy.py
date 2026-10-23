@@ -1,0 +1,70 @@
+import pandas as pd
+
+from src.site_proxy import build_site_proxy, normalize_manufacturer
+
+
+def test_manufacturer_normalization_preserves_unknowns():
+    assert normalize_manufacturer("GE Medical Systems") == "ge"
+    assert normalize_manufacturer("Toshiba") == "canon"
+    assert normalize_manufacturer("Acme Scanner") == "acme_scanner"
+
+
+def test_small_groups_are_coarsened_and_auditable():
+    metadata = pd.DataFrame(
+        {
+            "StudyInstanceUID": [str(i) for i in range(6)],
+            "Manufacturer": ["Siemens"] * 6,
+            "ManufacturerModelName": [f"Model-{i}" for i in range(6)],
+            "MagneticFieldStrength": [1.5 + i / 10 for i in range(6)],
+        }
+    )
+    reports = pd.DataFrame(
+        {
+            "StudyInstanceUID": [str(i) for i in range(6)],
+            "detected_language": ["en"] * 6,
+            "placeholder_signature": [f"sig-{i}" for i in range(6)],
+        }
+    )
+
+    result = build_site_proxy(metadata, reports, min_group_size=3)
+
+    assert result["site_proxy_assignment_level"].eq("manufacturer_language").all()
+    assert result["site_proxy_group_size"].eq(6).all()
+    assert result["site_proxy_key"].map(len).eq(2).all()
+    assert result["full_site_proxy_key"].map(len).eq(5).all()
+
+
+def test_remaining_singleton_merges_into_nearest_larger_group():
+    metadata = pd.DataFrame(
+        {
+            "StudyInstanceUID": ["a", "b", "c", "d"],
+            "Manufacturer": ["Siemens", "Philips", "GE", "Toshiba"],
+            "ManufacturerModelName": ["A", "B", "C", "D"],
+            "MagneticFieldStrength": [1.5, 3.0, 1.5, 3.0],
+        }
+    )
+    reports = pd.DataFrame(
+        {
+            "StudyInstanceUID": ["a", "b", "c", "d"],
+            "detected_language": ["en", "en", "en", "de"],
+            "placeholder_signature": ["x", "y", "z", "w"],
+        }
+    )
+
+    result = build_site_proxy(metadata, reports, min_group_size=3)
+
+    assert result["site_proxy_group_size"].min() >= 3
+    assert not result["site_proxy_under_minimum"].any()
+    assert result.loc[result["StudyInstanceUID"] == "d", "site_proxy_merged_small"].item()
+    assert result.loc[result["StudyInstanceUID"] == "d", "site_proxy_assignment_level"].item() == "merged_nearest_larger"
+    assert result["site_proxy_key"].map(len).isin([1]).all()
+
+
+def test_operational_group_threshold_defaults_to_ten():
+    import inspect
+
+    from src.site_proxy import flag_small_groups, report_group_sizes
+
+    assert inspect.signature(build_site_proxy).parameters["min_group_size"].default == 10
+    assert inspect.signature(report_group_sizes).parameters["minimum"].default == 10
+    assert inspect.signature(flag_small_groups).parameters["minimum"].default == 10
